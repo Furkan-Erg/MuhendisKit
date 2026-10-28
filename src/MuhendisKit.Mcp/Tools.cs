@@ -90,9 +90,22 @@ public sealed class Tools(AppClient app)
         - tank: { systemVolumeL, maxTempC, staticHeightM, safetyValveBar, fillTempC=10 } → expansion vessel (TS EN 12828)
         - gas: { material: celik|bakir, flowM3h, lengthM, maxDropMbar, relativeDensity=0.6 } → Renouard low pressure sizing
         - heatloss: { rooms: [{ name, surfaces: [{ name, area, u, tempDiff }], volumeM3, airChangesPerHour, insideTempC, outsideTempC, incrementPercent }] }
+        - voltage_drop: { phase: mono|tri, powerKw, lengthM (one way), voltageV (230 mono / 400 tri), material: cu|al, limitPercent } → %e per standard section + suggested
+          (limits commonly applied after the building connection box: lighting/sockets 1,5 %, motors 3 % — Elektrik İç Tesisleri Yönetmeliği md. 57 as quoted by EMO; ampacity is not checked)
+        - power: { phase, voltageV, cosPhi, powerKw | currentA } → current, kVA, kVAr
+        - compensation: { powerKw, cosPhi1, cosPhi2 } → capacitor kVAr
+        - fire_water: { hazard: dusuk|orta1..orta4|yuksek1..yuksek4, sprinkler, drySprinkler, sprinklerHeightM, cabinets, cabinetType: yari-sert|yassi, hydrant }
+          → fire water flow and tank volume per BYKHY md. 92/94/95 and Ek-8/A-C (requirements and article references included)
+        - rain: { areaM2, c, intensityMmMin, material: asbest|beton|font|ctp|celik, slopePercent, maxFilling=0.9, manningN? } → Q = C·r·A (r = 166,7·i)
+          and part-full Manning pipe sizing with 0,5–5 m/s and ≤ 90 % filling (Yağmursuyu Yönetmeliği 2017 EK-1). C by area type (Çizelge 1.3):
+          şehir merkezi 0,70–0,95, tali merkez 0,50–0,70, tek katlı konut 0,30–0,50, ayrık nizam 0,40–0,60, bitişik nizam 0,60–0,75,
+          apartman 0,50–0,70, endüstri 0,50–0,80, park 0,20–0,35. Rain intensity i (mm/min) comes from local MGM data: ask.
+        - radiator: { heatW, supplyC, returnC, roomC, exponent (catalogue n), catalogPerUnitW? } → required ΔT50 (EN 442) output and units
+        - booster: { flowM3h (peak), heightM, lossBar, tapPressureBar (spec: 1), differentialBar, startsPerHour, pumps=1, lowestFixtureBelowM=0 }
+          → hidrofor cut-in/out pressure, membrane tank volume, checks against the ministry's spec (static 1–4 bar, zone ≤ 60 m)
         Design limits (max velocity, pressure drop, allowed gas drop, outside design temperature) come from the project specification: ask, don't assume.
         """)]
-    public async Task<string> Calculate([Description("pipe, pipe_flow, duct, psychro, tank, gas or heatloss")] string kind,
+    public async Task<string> Calculate([Description("pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator or booster")] string kind,
         [Description("Input object for that kind")] JsonElement input, CancellationToken ct)
     {
         input = Json(input);
@@ -105,7 +118,14 @@ public sealed class Tools(AppClient app)
             "tank" => ("host.calc.tank", new { input }),
             "gas" => ("host.calc.gas", new { input }),
             "heatloss" => ("host.calc.heatloss", input),
-            _ => throw new McpAppException("kind: pipe, pipe_flow, duct, psychro, tank, gas veya heatloss olmalı."),
+            "voltage_drop" => ("host.calc.voltageDrop", new { input }),
+            "power" => ("host.calc.power", new { input }),
+            "compensation" => ("host.calc.compensation", new { input }),
+            "fire_water" => ("host.calc.fireWater", new { input }),
+            "rain" => ("host.calc.rain", new { input }),
+            "radiator" => ("host.calc.radiator", new { input }),
+            "booster" => ("host.calc.booster", new { input }),
+            _ => throw new McpAppException("kind: pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator veya booster olmalı."),
         };
         return Text(await app.CallAsync(cmd, args, ct));
     }

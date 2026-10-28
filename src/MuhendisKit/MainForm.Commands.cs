@@ -96,6 +96,22 @@ sealed partial class MainForm
                 return GasPipe.Size(Arg<GasPipeInput>(args, "input"));
             case "calc.heatloss":
                 return Arg<HeatLossRoom[]>(args, "rooms").Select(HeatLoss.Room).ToArray();
+            case "calc.voltageDrop":
+                return VoltageDrop.Size(Arg<VoltageDropInput>(args, "input"));
+            case "calc.power":
+                return Power.Compute(Arg<PowerInput>(args, "input"));
+            case "calc.compensation":
+                return Compensation.Size(Arg<CompensationInput>(args, "input"));
+            case "calc.fireWater":
+                return FireWater.Size(Arg<FireWaterInput>(args, "input"));
+            case "calc.rainTables":
+                return new { areaTypes = RainRegulation.AreaTypes, materials = RainRegulation.Materials };
+            case "calc.rain":
+                return RainDrainage.Size(Arg<RainDrainageInput>(args, "input"));
+            case "calc.radiator":
+                return Radiator.Size(Arg<RadiatorInput>(args, "input"));
+            case "calc.booster":
+                return Booster.Size(Arg<BoosterInput>(args, "input"));
 
             // ---- insulation ----
             case "ins.evaluate":

@@ -1,4 +1,4 @@
-// Mekanik hesaplar: one panel per calculator; the math runs in MuhendisKit.Core.
+// Mekanik ve elektrik hesaplar: one panel per calculator; the math runs in MuhendisKit.Core.
 "use strict";
 
 const PIPE_MATERIALS = [
@@ -14,6 +14,8 @@ function sizingTable(rows, cols, suggested) {
       cols.map(c => h("td", { class: c.num ? "num" : null }, c.get(r))))))));
 }
 const fitBadge = r => r.fits ? h("span", { class: "badge ok" }, "Uygun") : h("span", { class: "badge" }, "—");
+// Lookup tables a calculator's form loads from the host once (e.g. the rain regulation's C and Manning tables).
+const CALC_TABLES = {};
 
 const CALCS = [
   {
@@ -181,6 +183,220 @@ const CALCS = [
     summary: (r, v) => `${fmt(r.q, 2)} m³/h, L = ${fmt(v.l, 1)} m, ΔPmax ${fmt(v.maxDp, 2)} mbar → ${r.suggested ?? "uygun çap yok"}`,
   },
   {
+    id: "fire", title: "Yangın suyu deposu", icon: "flame", keywords: "yangın dolabı hidrant sprinkler yağmurlama depo bykhy yönetmelik",
+    desc: "Binaların Yangından Korunması Hakkında Yönetmelik md. 92, 94, 95 ve Ek-8/A, 8/B, 8/C'ye göre yangın suyu debisi ve depo hacmi (ön hesap).",
+    formula: "Yağmurlama: Q = yoğunluk (mm/dak) × koruma alanı (m²)   [Ek-8/B]\n+ dolap ve hidrant ilaveleri   [Ek-8/C]\nV = ΣQ × süre (düşük 30, orta 60, yüksek 90 dk)   [md. 92]\nYalnız dolap: 100 l/dak (yarı-sert) veya 400 l/dak (yassı) × süre   [md. 92 (6), 94]\nYalnız hidrant: en az 1900 l/dak × 90 dk   [md. 92 (7), 95]",
+    init: () => ({ hazard: "orta1", sprinkler: true, dry: false, height: 10, cabinets: true, cabinetType: "yari-sert", hydrant: false }),
+    form(v, go) {
+      const check = (key, label) => h("label", { class: "check" }, h("input", { type: "checkbox", checked: !!v[key], onchange: e => { v[key] = e.target.checked; go(true); } }), label);
+      return h("div", { class: "fields" },
+        selectField(v, "hazard", "Bina tehlike sınıfı (md. 19)", [
+          ["dusuk", "Düşük tehlike"], ["orta1", "Orta tehlike-1"], ["orta2", "Orta tehlike-2"], ["orta3", "Orta tehlike-3"], ["orta4", "Orta tehlike-4"],
+          ["yuksek1", "Yüksek tehlike-1"], ["yuksek2", "Yüksek tehlike-2"], ["yuksek3", "Yüksek tehlike-3"], ["yuksek4", "Yüksek tehlike-4"],
+        ].map(([value, label]) => ({ value, label })), { onChange: go }),
+        check("sprinkler", "Yağmurlama (sprinkler) sistemi"),
+        v.sprinkler && [
+          selectField(v, "dry", "Yağmurlama sistemi", [{ value: false, label: "Islak / ön uyarılı" }, { value: true, label: "Kuru / değişken" }], { onChange: go }),
+          numField(v, "height", "En alt ve en üst başlık arası yükseklik", { unit: "m", hint: "Ek-8/A tablo karşılaştırması için", onChange: go }),
+        ],
+        check("cabinets", "Yangın dolabı"),
+        v.cabinets && selectField(v, "cabinetType", "Dolap tipi", [{ value: "yari-sert", label: "Yarı-sert hortum (TS EN 671-1)" }, { value: "yassi", label: "Yassı hortum (TS EN 671-2)" }], { onChange: go }),
+        check("hydrant", "Hidrant sistemi"));
+    },
+    compute: v => rpc("calc.fireWater", { input: { hazard: v.hazard, sprinkler: !!v.sprinkler, drySprinkler: !!v.dry, sprinklerHeightM: v.sprinkler ? v.height : null, cabinets: !!v.cabinets, cabinetType: v.cabinetType, hydrant: !!v.hydrant } }),
+    view(r) {
+      return [
+        h("div", { class: "stats" },
+          stat("Toplam debi", fmt(r.flowLpm, 0), "l/dak"),
+          stat("Süre", fmt(r.minutes, 0), "dk"),
+          stat("Debi × süre", fmt(r.volumeM3, 1), "m³"),
+          r.tableVolumeM3 != null && stat("Ek-8/A tablo", fmt(r.tableVolumeM3, 0), "m³"),
+          stat("Tasarım depo hacmi", fmt(r.designVolumeM3, 1), "m³", "hero")),
+        h("div", { class: "table-wrap" }, h("table", { class: "t" },
+          h("thead", null, h("tr", null, ["Bileşen", "Debi (l/dak)", "Süre (dk)", "Hacim (m³)", "Kaynak"].map((x, i) => h("th", { class: i && i < 4 ? "num" : null }, x)))),
+          h("tbody", null, r.parts.map(p => h("tr", null, h("td", null, p.name), h("td", { class: "num" }, fmt(p.flowLpm, 0)),
+            h("td", { class: "num" }, fmt(p.minutes, 0)), h("td", { class: "num" }, fmt(p.volumeM3, 1)), h("td", { class: "faint small" }, p.source)))))),
+        r.requirements.length > 0 && h("div", { class: "stack" }, h("div", { class: "label" }, "Yönetmelik şartları"), r.requirements.map(x => note(x))),
+        r.notes.map(x => note(x)),
+      ];
+    },
+    summary: (r, v) => `${v.hazard}: ${fmt(r.flowLpm, 0)} l/dak, depo ${fmt(r.designVolumeM3, 1)} m³`,
+  },
+  {
+    id: "radiator", title: "Radyatör seçimi", icon: "thermo", keywords: "radyatör panel dilim seçim en 442 dt50 ısı verimi",
+    desc: "Mahal ısı yükü ve sistem sıcaklıklarına göre katalogda aranacak ΔT50 (75/65/20 °C) ısı verimi; EN 442 üs formülü.",
+    formula: "ΔTlm = (Tg − Td) / ln((Tg − Ti) / (Td − Ti))\nf = (ΔTlm / 49,83)^n\nQ50 = Q / f    (katalogdaki ΔT50 değeri en az bu kadar olmalı)",
+    init: () => ({ q: 1500, tg: 70, td: 55, ti: 20, n: 1.3, per: null }),
+    form(v, go) {
+      return h("div", { class: "fields" },
+        numField(v, "q", "Mahal ısı yükü", { unit: "W", hint: "Isı kaybı hesabından", onChange: go }),
+        numField(v, "tg", "Gidiş suyu", { unit: "°C", onChange: go }),
+        numField(v, "td", "Dönüş suyu", { unit: "°C", onChange: go }),
+        numField(v, "ti", "Oda sıcaklığı", { unit: "°C", onChange: go }),
+        numField(v, "n", "Radyatör üssü n", { hint: "Üretici kataloğundan; girilmezse 1,3 kabul edilmiştir", onChange: go }),
+        numField(v, "per", "Katalog ΔT50 verimi (isteğe bağlı)", { unit: "W / m, dilim ya da adet", onChange: go }));
+    },
+    compute: v => rpc("calc.radiator", { input: { heatW: v.q, supplyC: v.tg, returnC: v.td, roomC: v.ti, exponent: v.n ?? 1.3, catalogPerUnitW: v.per } }),
+    view(r) {
+      return [
+        h("div", { class: "stats" },
+          stat("ΔTlm", fmt(r.deltaTLog, 2), "K"),
+          stat("Düzeltme katsayısı f", fmt(r.factor, 3)),
+          stat("Gereken ΔT50 verimi", fmt(r.requiredNominalW, 0), "W", "hero"),
+          r.units != null && stat("Gereken miktar", fmt(r.units, 2), "m / dilim / adet")),
+        r.warning && note(r.warning, "warn"),
+      ];
+    },
+    summary: (r, v) => `${fmt(v.q, 0)} W, ${fmt(v.tg, 0)}/${fmt(v.td, 0)}/${fmt(v.ti, 0)} °C → ΔT50 ${fmt(r.requiredNominalW, 0)} W`,
+  },
+  {
+    id: "booster", title: "Hidrofor", icon: "droplet", keywords: "hidrofor pompa basınç tank genleşme membran kullanma suyu zon",
+    desc: "Hidrofor devreye girme/çıkma basıncı ve membranlı tank hacmi; Bakanlık Makina Tesisatı Genel Teknik Şartnamesi basınç ölçütleriyle kontrol.",
+    formula: "p_giriş = H / 10,2 + kayıplar + musluk akma basıncı (şartname: 1 bar)\np_çıkış = p_giriş + Δp\nVd = Q · (3600 / z) / 4      V = Vd · (p_çıkış + 1) / (p_çıkış − p_giriş)\nŞartname: statik basınç 1–4 bar, en çok 60 m'de (20 kat) bir zon",
+    init: () => ({ q: 3, h: 15, loss: 0.5, tap: 1, dp: 1, z: 20, pumps: 1, below: 0 }),
+    form(v, go) {
+      return h("div", { class: "fields" },
+        numField(v, "q", "Pik debi", { unit: "m³/h", hint: "Eş zamanlı kullanım debisi", onChange: go }),
+        numField(v, "h", "Hidrofor – en üst musluk kot farkı", { unit: "m", onChange: go }),
+        numField(v, "loss", "Boru, sayaç ve armatür kayıpları", { unit: "bar", hint: "Şartname: su sayacında en çok 0,5 bar", onChange: go }),
+        numField(v, "tap", "En üst muslukta akma basıncı", { unit: "bar", hint: "Şartname: normal musluklarda 1 bar", onChange: go }),
+        numField(v, "dp", "Devreye girme–çıkma farkı", { unit: "bar", onChange: go }),
+        numField(v, "z", "Saatte en çok kalkış", { hint: "Pompa motoru üreticisinden", onChange: go }),
+        numField(v, "pumps", "Asıl pompa sayısı", { onChange: go }),
+        numField(v, "below", "Hidrofor altındaki en alt musluk derinliği", { unit: "m", onChange: go }));
+    },
+    compute: v => rpc("calc.booster", { input: { flowM3h: v.q, heightM: v.h, lossBar: v.loss, tapPressureBar: v.tap, differentialBar: v.dp, startsPerHour: v.z, pumps: v.pumps, lowestFixtureBelowM: v.below } }),
+    view(r) {
+      return [
+        h("div", { class: "stats" },
+          stat("Devreye girme", fmt(r.cutInBar, 2), "bar"),
+          stat("Devreden çıkma", fmt(r.cutOutBar, 2), "bar"),
+          stat("Pompa basma yüksekliği", fmt(r.pumpHeadM, 1), "mSS"),
+          stat("Çekilen hacim", fmt(r.drawdownL, 0), "L"),
+          stat("Tank hacmi", fmt(r.tankVolumeL, 0), "L", "hero"),
+          stat("En alt muslukta statik", fmt(r.maxStaticAtLowestBar, 2), "bar", r.maxStaticAtLowestBar > 4 ? "bad" : null)),
+        r.warnings.map(w => note(w, "warn")),
+      ];
+    },
+    summary: (r, v) => `${fmt(v.q, 2)} m³/h, H ${fmt(v.h, 0)} m → ${fmt(r.cutInBar, 1)}/${fmt(r.cutOutBar, 1)} bar, tank ${fmt(r.tankVolumeL, 0)} L`,
+  },
+  {
+    id: "rain", title: "Yağmur suyu debisi ve boru çapı", icon: "droplet", keywords: "yağmur suyu rasyonel yöntem akış katsayısı kanal boru manning parsel",
+    desc: "Rasyonel yöntemle yağmur suyu debisi ve kısmi dolu Manning ile boru/kanal çapı; Yağmursuyu Toplama, Depolama ve Deşarj Sistemleri Hakkında Yönetmelik (2017) EK-1.",
+    formula: "r = 166,7 · i   (l/s·ha; i mm/dak)   [denklem 1.2]\nQ = C · r · A   (l/s; A ha)   [denklem 1.8]\nQ = (1/n) · A · R^(2/3) · S^(1/2)   (kısmi dolu daire kesit)\nSınırlar: hız 0,5–5 m/s, doluluk ≤ %90; beton kanalda Çizelge 1.4 eğimleri",
+    init: () => ({ area: 1000, areaType: "apartman", c: 0.7, i: null, material: "beton", slope: 1, fill: 0.9 }),
+    async form(v, go) {
+      CALC_TABLES.rain ??= await rpc("calc.rainTables");
+      const t = CALC_TABLES.rain;
+      const at = t.areaTypes.find(a => a.id === v.areaType);
+      return h("div", { class: "fields" },
+        numField(v, "area", "Drenaj alanı", { unit: "m²", onChange: go }),
+        selectField(v, "areaType", "Alan tipi (Çizelge 1.3)", t.areaTypes.map(a => ({ value: a.id, label: `${a.name} (${fmt(a.cMin, 2)}–${fmt(a.cMax, 2)})` })), {
+          onChange: () => { const a = t.areaTypes.find(x => x.id === v.areaType); v.c = a.cMax; go(true); },
+        }),
+        numField(v, "c", "Akış katsayısı C", { hint: at ? `Tablo aralığı ${fmt(at.cMin, 2)}–${fmt(at.cMax, 2)}; varsayılan üst sınır` : null, onChange: go }),
+        numField(v, "i", "Yağış şiddeti i", { unit: "mm/dak", hint: "MGM süre-şiddet-frekans verisinden (yerel değer)", onChange: go }),
+        selectField(v, "material", "Boru malzemesi (Çizelge 1.5)", t.materials.map(m => ({ value: m.id, label: `${m.name} (n = ${fmt(m.manning, 3)})` })), { onChange: go }),
+        numField(v, "slope", "Eğim", { unit: "%", hint: "Bina yatay boruları: şartnameye göre en az %1", onChange: go }),
+        numField(v, "fill", "En büyük doluluk oranı", { hint: "Yönetmelik: %90'a kadar", onChange: go }));
+    },
+    validate: v => v.i == null ? "Yağış şiddetini girin (MGM'nin yerel süre-şiddet-frekans verisi; program bölgesel değer tahmin etmez)." : null,
+    compute: v => rpc("calc.rain", { input: { areaM2: v.area, c: v.c, intensityMmMin: v.i, material: v.material, slopePercent: v.slope, maxFilling: v.fill } }),
+    view(r) {
+      return [
+        h("div", { class: "stats" },
+          stat("Yağmur verimi r", fmt(r.yieldLpsHa, 1), "l/s·ha"),
+          stat("Debi Q", fmt(r.flowLps, 2), "l/s"),
+          stat("Önerilen iç çap", r.suggested ? "Ø" + r.suggested + " mm" : "Uygun çap yok", null, r.suggested ? "hero" : "bad")),
+        sizingTable(r.rows.map(x => ({ ...x, name: x.diameterMm })), [
+          { label: "İç çap (mm)", get: x => "Ø" + x.diameterMm },
+          { label: "Kapasite (l/s)", num: true, get: x => fmt(x.capacityLps, 1) },
+          { label: "Doluluk", num: true, get: x => x.filling != null ? "%" + fmt(x.filling * 100, 0) : "—" },
+          { label: "Hız (m/s)", num: true, get: x => x.velocity != null ? fmt(x.velocity, 2) : "—" },
+          { label: "Not", get: x => x.warning ? h("span", { class: "faint small" }, x.warning) : "" },
+          { label: "", get: fitBadge },
+        ], r.suggested),
+        note("Çaplar iç çap olarak değerlendirilir; plastik borularda katalog iç çapını kontrol edin.", ""),
+      ];
+    },
+    summary: (r, v) => `A ${fmt(v.area, 0)} m², C ${fmt(v.c, 2)}, i ${fmt(v.i, 2)} mm/dak → Q ${fmt(r.flowLps, 1)} l/s, ${r.suggested ? "Ø" + r.suggested : "uygun çap yok"}`,
+  },
+  {
+    id: "vdrop", title: "Gerilim düşümü ve kesit", icon: "bolt", keywords: "elektrik kablo kesit gerilim düşümü linye kolon",
+    desc: "Aktif güç ile omik gerilim düşümü; her standart kesit için % düşüm ve sınırı sağlayan en küçük kesit.",
+    formula: "Monofaze: %e = 200 · L · P / (k · S · U²)\nTrifaze:  %e = 100 · L · P / (k · S · U²)\n(P W, L tek yön m, S mm², U V; k bakır 56, alüminyum 35 m/Ωmm²)",
+    init: () => ({ phase: "mono", kw: 3, l: 25, u: 230, material: "cu", limit: 1.5 }),
+    form(v, go) {
+      return h("div", { class: "fields" },
+        selectField(v, "phase", "Faz", [{ value: "mono", label: "Monofaze" }, { value: "tri", label: "Trifaze" }], { onChange: () => { v.u = v.phase === "tri" ? 400 : 230; go(true); } }),
+        numField(v, "kw", "Güç (talep gücü)", { unit: "kW", onChange: go }),
+        numField(v, "l", "Hat uzunluğu (tek yön)", { unit: "m", onChange: go }),
+        numField(v, "u", v.phase === "tri" ? "Fazlar arası gerilim" : "Faz-nötr gerilimi", { unit: "V", onChange: go }),
+        selectField(v, "material", "İletken", [{ value: "cu", label: "Bakır (k = 56)" }, { value: "al", label: "Alüminyum (k = 35)" }], { onChange: go }),
+        selectField(v, "limit", "İzin verilen düşüm", [{ value: 1.5, label: "%1,5 aydınlatma / priz" }, { value: 3, label: "%3 motor" }, { value: 5, label: "%5" }], {
+          onChange: go, hint: "Yapı bağlantı kutusundan sonra; Elektrik İç Tesisleri Yönetmeliği md. 57 (EMO aktarımı, resmi metinle doğrulanmadı)",
+        }));
+    },
+    compute: v => rpc("calc.voltageDrop", { input: { phase: v.phase, powerKw: v.kw, lengthM: v.l, voltageV: v.u, material: v.material, limitPercent: v.limit } }),
+    view(r) {
+      return [
+        h("div", { class: "stats" }, stat("Önerilen kesit", r.suggested != null ? fmt(r.suggested, 1) + " mm²" : "300 mm² yetmiyor", null, r.suggested != null ? "hero" : "bad")),
+        sizingTable(r.rows.map(x => ({ ...x, name: x.sectionMm2 })), [
+          { label: "Kesit (mm²)", get: x => fmt(x.sectionMm2, 1) },
+          { label: "Düşüm (%)", num: true, get: x => fmt(x.dropPercent, 3) },
+          { label: "Düşüm (V)", num: true, get: x => fmt(x.dropV, 2) },
+          { label: "", get: fitBadge },
+        ], r.suggested),
+        note("Kesit ayrıca akım taşıma kapasitesine ve koruma elemanına göre kontrol edilmelidir; bu hesap yalnız gerilim düşümüne bakar.", "warn"),
+      ];
+    },
+    summary: (r, v) => `${v.phase === "tri" ? "3~" : "1~"} ${fmt(v.kw, 2)} kW, ${fmt(v.l, 0)} m, %${fmt(v.limit, 1)} → ${r.suggested != null ? fmt(r.suggested, 1) + " mm²" : "uygun kesit yok"}`,
+  },
+  {
+    id: "power", title: "Akım ve güç", icon: "bolt", keywords: "elektrik akım güç kva kvar cosfi sigorta",
+    desc: "Aktif güçten (veya akımdan) akım, görünür ve reaktif güç.",
+    formula: "Monofaze: I = P / (U · cosφ)\nTrifaze:  I = P / (√3 · U · cosφ)\nS = P / cosφ      Q = S · sinφ",
+    init: () => ({ phase: "tri", mode: "p", kw: 10, a: 16, u: 400, cos: 0.85 }),
+    form(v, go) {
+      return h("div", { class: "fields" },
+        selectField(v, "phase", "Faz", [{ value: "mono", label: "Monofaze" }, { value: "tri", label: "Trifaze" }], { onChange: () => { v.u = v.phase === "tri" ? 400 : 230; go(true); } }),
+        selectField(v, "mode", "Giriş", [{ value: "p", label: "Aktif güçten" }, { value: "i", label: "Akımdan" }], { onChange: () => go(true) }),
+        v.mode === "p" ? numField(v, "kw", "Aktif güç", { unit: "kW", onChange: go }) : numField(v, "a", "Akım", { unit: "A", onChange: go }),
+        numField(v, "u", v.phase === "tri" ? "Fazlar arası gerilim" : "Faz-nötr gerilimi", { unit: "V", onChange: go }),
+        numField(v, "cos", "Güç katsayısı cosφ", { onChange: go }));
+    },
+    compute: v => rpc("calc.power", { input: { phase: v.phase, voltageV: v.u, cosPhi: v.cos, powerKw: v.mode === "p" ? v.kw : null, currentA: v.mode === "i" ? v.a : null } }),
+    view(r) {
+      return h("div", { class: "stats" },
+        stat("Akım", fmt(r.currentA, 2), "A", "hero"),
+        stat("Aktif güç", fmt(r.powerKw, 3), "kW"),
+        stat("Görünür güç", fmt(r.apparentKva, 3), "kVA"),
+        stat("Reaktif güç", fmt(r.reactiveKvar, 3), "kVAr"));
+    },
+    summary: (r, v) => `${v.phase === "tri" ? "3~" : "1~"} ${fmt(r.powerKw, 2)} kW, cosφ ${fmt(v.cos, 2)} → ${fmt(r.currentA, 1)} A`,
+  },
+  {
+    id: "comp", title: "Kompanzasyon", icon: "bolt", keywords: "elektrik reaktif güç kondansatör kompanzasyon cosfi",
+    desc: "Güç katsayısını hedef değere çıkarmak için gereken kondansatör gücü.",
+    formula: "Qc = P · (tanφ₁ − tanφ₂)\nAkımdaki azalma = 1 − cosφ₁ / cosφ₂",
+    init: () => ({ kw: 100, cos1: 0.75, cos2: 0.95 }),
+    form(v, go) {
+      return h("div", { class: "fields" },
+        numField(v, "kw", "Aktif güç", { unit: "kW", onChange: go }),
+        numField(v, "cos1", "Mevcut cosφ₁", { onChange: go }),
+        numField(v, "cos2", "Hedef cosφ₂", { onChange: go }));
+    },
+    compute: v => rpc("calc.compensation", { input: { powerKw: v.kw, cosPhi1: v.cos1, cosPhi2: v.cos2 } }),
+    view(r) {
+      return h("div", { class: "stats" },
+        stat("Kondansatör gücü", fmt(r.capacitorKvar, 2), "kVAr", "hero"),
+        stat("tanφ₁ / tanφ₂", `${fmt(r.tan1, 3)} / ${fmt(r.tan2, 3)}`),
+        stat("Görünür güç", `${fmt(r.apparentBeforeKva, 1)} → ${fmt(r.apparentAfterKva, 1)}`, "kVA"),
+        stat("Akımdaki azalma", fmt(r.currentReductionPercent, 1), "%"));
+    },
+    summary: (r, v) => `${fmt(v.kw, 1)} kW, cosφ ${fmt(v.cos1, 2)} → ${fmt(v.cos2, 2)}: ${fmt(r.capacitorKvar, 1)} kVAr`,
+  },
+  {
     id: "units", title: "Birim çevirici", icon: "swap", keywords: "birim dönüştür kcal btu bar psi mmss cfm",
     desc: "Mekanik tesisatta sık kullanılan birimler.",
     custom: true,
@@ -205,7 +421,7 @@ function convertTemp(v, from, to) {
 }
 
 App.register({
-  id: "calc", title: "Mekanik hesaplar", icon: "calc", group: "Modüller", keywords: "hesap makinesi",
+  id: "calc", title: "Mekanik ve elektrik hesaplar", icon: "calc", group: "Modüller", keywords: "hesap makinesi elektrik yangın",
   states: {},
   results: {},
   selected: "pipe",
@@ -219,7 +435,7 @@ App.register({
   show(id) {
     if (id) this.selected = id;
     const el = clear(this.el);
-    el.append(h("div", { class: "page-head" }, h("div", { class: "grow" }, h("h1", null, "Mekanik hesaplar"),
+    el.append(h("div", { class: "page-head" }, h("div", { class: "grow" }, h("h1", null, "Mekanik ve elektrik hesaplar"),
       h("div", { class: "sub" }, "Sonuçlar girdikçe güncellenir. Projeye kaydettiğiniz hesaplar proje dosyasında saklanır."))));
     this.listEl = h("div", { class: "card list" });
     this.panelEl = h("div", { class: "stack" });
@@ -274,7 +490,10 @@ App.register({
       }
     };
     const go = debounce(run, 180);
-    const renderForm = () => clear(formHost).append(c.form(v, rebuild => { if (rebuild === true) renderForm(); go(); }));
+    const renderForm = async () => {
+      try { clear(formHost).append(await c.form(v, rebuild => { if (rebuild === true) renderForm(); go(); })); }
+      catch (e) { clear(formHost).append(note(e.message, "bad")); }
+    };
     renderForm();
 
     panel.append(h("div", { class: "card" },
@@ -297,10 +516,10 @@ App.register({
     this.show();
   },
 
-  pdf(c, v) {
+  async pdf(c, v) {
     const r = this.results[c.id];
     if (!r) { toast("Önce hesabı tamamlayın", "bad"); return; }
-    const inputs = h("div", { class: "card card-pad" }, h("h3", null, "Girdiler"), c.form(clone(v), () => { }));
+    const inputs = h("div", { class: "card card-pad" }, h("h3", null, "Girdiler"), await c.form(clone(v), () => { }));
     printReport(c.title, h("div", { class: "stack" }, inputs, h("div", { class: "card card-pad" }, c.view(r, v)), h("div", { class: "formula" }, c.formula)));
   },
 

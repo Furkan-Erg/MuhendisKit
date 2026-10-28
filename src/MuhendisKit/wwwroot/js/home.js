@@ -23,7 +23,7 @@ App.register({
 
     const d = p?.data;
     const tiles = [
-      { id: "calc", icon: "calc", title: "Mekanik hesaplar", desc: "Isı kaybı, boru ve kanal çapı, psikrometri, genleşme tankı, doğalgaz, birim çevirici.", foot: d ? `${d.calcs.length} kayıtlı hesap` : "Proje gerektirmez" },
+      { id: "calc", icon: "calc", title: "Mekanik ve elektrik hesaplar", desc: "Isı kaybı, radyatör, boru ve kanal çapı, genleşme tankı, doğalgaz, hidrofor, yağmur suyu, yangın suyu, gerilim düşümü, kompanzasyon.", foot: d ? `${d.calcs.length} kayıtlı hesap` : "Proje gerektirmez" },
       { id: "ins", icon: "wall", title: "Isı yalıtımı", desc: "Katman katman U değeri, TS 825 sınır kontrolü, Glaser yoğuşma analizi.", foot: d ? `${d.insulation.elements.length} yapı elemanı` : "Proje gerekir" },
       { id: "hak", icon: "receipt", title: "Hakediş", desc: "Poz, metraj (yeşil defter), hakediş icmali, fiyat farkı ve Excel çıktısı.", foot: d ? `${d.job.items.length} poz · ${d.job.periods.length} hakediş` : "Proje gerekir" },
       { id: "cad", icon: "drawing", title: "Çizim (2B)", desc: "DWG/DXF açma ve çizme, katmanlar, ölçülendirme, çizimden metraj.", foot: "AutoCAD gerekmez" },
@@ -49,10 +49,10 @@ App.register({
 
     let catalog = { count: 0 };
     try { catalog = await rpc("catalog.info"); } catch { }
-    const limits = App.settings.uLimits?.values ?? {};
-    const limitCount = Object.values(limits).reduce((n, z) => n + Object.values(z ?? {}).filter(v => v != null).length, 0);
+    const limits = uLimits().values;
+    const limitCount = Object.values(limits).reduce((n, z) => n + Object.values(z ?? {}).filter(v => typeof v === "number").length, 0);
     const rows = [
-      [limitCount > 0, "TS 825:2024 sınır U değerleri", limitCount > 0 ? `${limitCount} değer girildi` : "Girilmedi: U kontrolü için Ayarlar'dan standarttaki tabloyu girin", "settings"],
+      [limitCount > 0, "TS 825:2024 tavsiye U değerleri", limitCount > 0 ? `${limitCount} değer` : "Boş: Ayarlar'dan tabloyu doldurun", "settings"],
       [!!App.settings.evdsKey, "TCMB EVDS anahtarı", App.settings.evdsKey ? "Tanımlı: endeksler otomatik çekilebilir" : "Yok: endeksler elle girilir", "settings"],
       [catalog.count > 0, "Birim fiyat kataloğu", catalog.count > 0 ? `${catalog.count.toLocaleString(TR)} poz` : "Boş: Ayarlar'dan Bakanlık listesini indirin", "settings"],
     ];

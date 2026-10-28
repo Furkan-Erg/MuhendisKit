@@ -24,18 +24,26 @@ App.register({
           },
         }))));
 
-    // TS 825 limit table
-    st.uLimits ??= { source: "", values: {} };
-    const lim = st.uLimits;
+    // TS 825 U table (seeded from TS825_DEFAULTS on first use)
+    const lim = uLimits();
     for (const z of ZONES) lim.values[z] ??= {};
     el.append(h("div", { class: "card", style: { marginBottom: "16px" } },
-      h("div", { class: "card-head" }, h("h2", null, "TS 825:2024 sınır U değerleri"), h("span", { class: "badge warn" }, "Standarttan girilir")),
+      h("div", { class: "card-head" }, h("h2", null, "TS 825:2024 tavsiye U değerleri"),
+        btn("Varsayılana dön", async () => {
+          if (!await confirmBox("U değerlerini sıfırla", "Tablodaki değişiklikleriniz silinip varsayılan değerler yüklenecek.", "Sıfırla", true)) return;
+          lim.values = clone(TS825_DEFAULTS); lim.highGlazing = clone(TS825_HIGH_GLAZING); lim.source = TS825_SOURCE;
+          save(); this.show();
+        }, { cls: "sm ghost" })),
       h("div", { class: "card-body stack" },
-        note("TS 825:2024 metni TSE'nin ücretli yayınıdır ve program sınır değerleri tahmin etmez. Standarttaki ilgili tablodan her bölge için azami U değerlerini (W/m²K) girin; boş bırakılanlar için kontrol yapılmaz."),
+        note("Varsayılan değerler belediyenin gösterdiği tesisat.org TS 825 programından alındı; orada \"TS 825 tavsiye U değeri\" olarak geçer. Değerler W/m²K'dir ve değiştirilebilir; boş bırakılan için kontrol yapılmaz."),
         h("div", { class: "table-wrap" }, h("table", { class: "t" },
-          h("thead", null, h("tr", null, h("th", null, "Bölge"), LIMIT_KEYS.map(k => h("th", { class: "num" }, k.label)))),
+          h("thead", null, h("tr", null, h("th", null, "Bölge"), LIMIT_KEYS.map(k => h("th", { class: "num" }, k.label)), h("th", { class: "num" }, "Cam g"))),
           h("tbody", null, ZONES.map(z => h("tr", null, h("td", null, z + ". bölge"),
-            LIMIT_KEYS.map(k => h("td", null, numField(lim.values[z], k.key, null, { bare: true, cls: "num", placeholder: "—", onChange: save })))))))),
+            LIMIT_KEYS.map(k => h("td", null, numField(lim.values[z], k.key, null, { bare: true, cls: "num", placeholder: "—", onChange: save }))),
+            h("td", null, textField(lim.values[z], "g", null, { bare: true, placeholder: "—", onChange: save }))))))),
+        h("div", { class: "grid g2" },
+          numField(lim.highGlazing, "factor", "Cam oranı ≥ %60: opak eleman katsayısı", { onChange: save, hint: "Duvar, çatı ve döşeme değerleri bununla çarpılır (0,75 = %25 daha küçük)." }),
+          numField(lim.highGlazing, "pencere", "Cam oranı ≥ %60: pencere U", { unit: "W/m²K", onChange: save })),
         textField(lim, "source", "Kaynak", { placeholder: "ör. TS 825:2024, Tablo …", onChange: save }))));
 
     // Materials

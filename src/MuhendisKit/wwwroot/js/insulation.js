@@ -16,6 +16,37 @@ const LIMIT_KEYS = [
 ];
 const ZONES = ["1", "2", "3", "4", "5", "6"];
 
+// TS 825:2024 U values per climate zone (W/m²K) from the reference the municipality designated: tesisat.org's
+// online TS 825 program, which lists them as "TS 825 Tavsiye U Değeri" (read 2026-10-28). Façades with ≥ 60 %
+// glazing use 25 % lower opaque values and a 1.6 window value. Seeded into Ayarlar once; the engineer can edit them.
+const TS825_SOURCE = "TS 825:2024 tavsiye U değerleri, tesisat.org/online/yalitim.html (belediyenin gösterdiği kaynak, 28.10.2026)";
+const TS825_DEFAULTS = {
+  "1": { duvar: 0.45, cati: 0.35, doseme: 0.40, pencere: 1.8, g: "≤ 0,45" },
+  "2": { duvar: 0.40, cati: 0.30, doseme: 0.35, pencere: 1.8, g: "≤ 0,45" },
+  "3": { duvar: 0.40, cati: 0.30, doseme: 0.35, pencere: 1.8, g: "≤ 0,45" },
+  "4": { duvar: 0.35, cati: 0.25, doseme: 0.30, pencere: 1.8, g: "≥ 0,55" },
+  "5": { duvar: 0.25, cati: 0.20, doseme: 0.25, pencere: 1.8, g: "≥ 0,55" },
+  "6": { duvar: 0.25, cati: 0.20, doseme: 0.25, pencere: 1.8, g: "≥ 0,55" },
+};
+const TS825_HIGH_GLAZING = { factor: 0.75, pencere: 1.6 };
+
+/** Settings' U table, filled with the defaults the first time (an engineer's own entries are never overwritten). */
+function uLimits() {
+  const st = App.settings;
+  const lim = st.uLimits ??= { source: "", values: {} };
+  const entered = Object.values(lim.values ?? {}).some(z => Object.values(z ?? {}).some(v => v != null && v !== ""));
+  if (!lim.seeded && !entered) {
+    lim.values = clone(TS825_DEFAULTS);
+    lim.highGlazing = clone(TS825_HIGH_GLAZING);
+    lim.source = TS825_SOURCE;
+    lim.seeded = true;
+    App.saveSettings();
+  }
+  lim.values ??= {};
+  lim.highGlazing ??= {};
+  return lim;
+}
+
 // Typical design values (TS EN ISO 10456 / common declared values). Projects must use the
 // manufacturer's declared λ; the engineer edits this library under Ayarlar.
 const DEFAULT_MATERIALS = [
@@ -48,9 +79,15 @@ function uValue(el) {
   const r = (el.rsi ?? 0) + el.layers.reduce((a, l) => a + layerR(l), 0) + (el.rse ?? 0);
   return r > 0 ? 1 / r : NaN;
 }
-function limitFor(el, zone) {
-  const v = App.settings.uLimits?.values?.[zone]?.[kindOf(el).limit];
-  return v == null ? null : v;
+/** Recommended U for the element in this zone; façades with ≥ 60 % glazing (highGlazing) use the stricter set. */
+function limitFor(el, zone, highGlazing = false) {
+  const lim = uLimits(), key = kindOf(el).limit;
+  const v = lim.values[zone]?.[key];
+  if (v == null || v === "") return null;
+  if (!highGlazing) return v;
+  if (key === "pencere") return lim.highGlazing.pencere ?? null;
+  const f = lim.highGlazing.factor;
+  return f == null ? null : Math.round(v * f * 100) / 100;
 }
 // Saturation pressure as in TS EN ISO 13788 (same as Envelope.SaturationPressure).
 const psatIso = t => t >= 0 ? 610.5 * Math.exp(17.269 * t / (237.3 + t)) : 610.5 * Math.exp(21.875 * t / (265.5 + t));
@@ -108,12 +145,12 @@ App.register({
   renderSide() {
     const d = this.data;
     const changed = () => { App.touch(); this.renderMain(); };
-    const limitsSet = Object.keys(App.settings.uLimits?.values ?? {}).length > 0;
+    const limitsSet = ZONES.some(z => Object.values(uLimits().values[z] ?? {}).some(v => typeof v === "number"));
     clear(this.sideEl).append(
       h("div", { class: "card" },
         h("div", { class: "card-head" }, h("h3", null, "Elemanlar")),
         d.elements.length ? h("div", { class: "list" }, d.elements.map(e => {
-          const u = uValue(e), lim = limitFor(e, d.zone);
+          const u = uValue(e), lim = limitFor(e, d.zone, d.highGlazing);
           return h("button", { class: "list-item" + (e.id === this.selectedId ? " active" : ""), onclick: () => { this.selectedId = e.id; this.renderSide(); this.renderMain(); } },
             h("div", { class: "grow" }, h("div", { class: "title" }, e.name), h("div", { class: "meta" }, kindOf(e).label)),
             h("span", { class: "badge " + (lim == null ? "" : u <= lim ? "ok" : "bad") }, isFinite(u) ? "U " + fmt(u, 3) : "—"));
@@ -125,7 +162,9 @@ App.register({
         h("div", { class: "card-head" }, h("h3", null, "İklim ve bölge")),
         h("div", { class: "card-body stack" },
           selectField(d, "zone", "TS 825:2024 iklim bölgesi", [{ value: null, label: "Seçilmedi" }, ...ZONES.map(z => ({ value: z, label: z + ". bölge" }))], { onChange: () => { App.touch(); this.renderSide(); this.renderMain(); } }),
-          !limitsSet && note(h("span", null, "Sınır U değerleri girilmedi. ", h("a", { onclick: () => App.go("settings") }, "Ayarlar"), "'dan standarttaki tabloyu girin."), "warn"),
+          h("label", { class: "check" }, h("input", { type: "checkbox", checked: !!d.highGlazing, onchange: e => { d.highGlazing = e.target.checked; App.touch(); this.renderSide(); this.renderMain(); } }),
+            "Cephe cam oranı %60 veya üzeri"),
+          !limitsSet && note(h("span", null, "Tavsiye U değerleri boş. ", h("a", { onclick: () => App.go("settings") }, "Ayarlar"), "'dan tabloyu doldurun."), "warn"),
           h("div", { class: "label" }, "Yoğuşma analizi koşulları"),
           h("div", { class: "grid g2" },
             numField(d.climate, "insideTemp", "İç sıcaklık", { unit: "°C", onChange: changed }),
@@ -239,7 +278,7 @@ App.register({
     const kind = kindOf(el);
     const c = d.climate;
     const climateOk = [c.insideTemp, c.insideRh, c.outsideTemp, c.outsideRh].every(x => x != null);
-    const lim = limitFor(el, d.zone);
+    const lim = limitFor(el, d.zone, d.highGlazing);
     const insIndex = el.layers.findIndex(l => l.insulation);
     let r;
     try {
@@ -256,13 +295,13 @@ App.register({
       h("div", { class: "stats" },
         stat("U değeri", isFinite(r.u) ? fmt(r.u, 3) : "—", "W/m²K", ok == null ? "hero" : ok ? "ok" : "bad"),
         r.rTotal != null && stat("Toplam ısıl direnç", fmt(r.rTotal, 3), "m²K/W"),
-        stat("Sınır U (" + (d.zone ? d.zone + ". bölge" : "bölge yok") + ")", lim != null ? fmt(lim, 3) : "Girilmedi", lim != null ? "W/m²K" : null),
+        stat("Tavsiye U (" + (d.zone ? d.zone + ". bölge" : "bölge yok") + ")", lim != null ? fmt(lim, 3) : "Girilmedi", lim != null ? "W/m²K" : null),
         r.required != null && insIndex >= 0 && stat("Gerekli yalıtım", fmt(Math.ceil(r.required * 1000) / 10, 1), "cm",
           ok === false ? "bad" : null)),
-      ok === true ? note(`U = ${fmt(r.u, 3)} ≤ ${fmt(lim, 3)} W/m²K: sınır değeri sağlıyor.`, "ok")
-        : ok === false ? note(`U = ${fmt(r.u, 3)} > ${fmt(lim, 3)} W/m²K: sınır değeri sağlamıyor.` +
+      ok === true ? note(`U = ${fmt(r.u, 3)} ≤ ${fmt(lim, 3)} W/m²K: TS 825 tavsiye değerini sağlıyor.`, "ok")
+        : ok === false ? note(`U = ${fmt(r.u, 3)} > ${fmt(lim, 3)} W/m²K: TS 825 tavsiye değerini sağlamıyor.` +
           (r.required != null && insIndex >= 0 ? ` "${el.layers[insIndex].name}" en az ${fmt(Math.ceil(r.required * 1000) / 10, 1)} cm olmalı.` : ""), "bad")
-          : note(d.zone ? "Bu bölge ve eleman türü için sınır değer girilmemiş (Ayarlar)." : "Sınır kontrolü için iklim bölgesini seçin."),
+          : note(d.zone ? "Bu bölge ve eleman türü için tavsiye U değeri yok (Ayarlar)." : "U kontrolü için iklim bölgesini seçin."),
       !kind.window && insIndex < 0 && lim != null && h("div", { class: "hint faint small" }, "Gerekli kalınlık için katman tablosunda yalıtım katmanını işaretleyin."));
 
     clear(chartsHost);
@@ -360,7 +399,7 @@ App.register({
     const parts = [];
     const summary = [];
     for (const el of d.elements) {
-      const lim = limitFor(el, d.zone);
+      const lim = limitFor(el, d.zone, d.highGlazing);
       let r;
       try {
         r = await rpc("ins.evaluate", {
@@ -384,7 +423,7 @@ App.register({
                 h("td", { class: "num" }, fmt(l.mu, 0)), h("td", { class: "num" }, fmt(layerR(l), 3)))),
               h("tr", null, h("td", null, "Dış yüzey (Rse)"), h("td"), h("td"), h("td"), h("td", { class: "num" }, fmt(el.rse, 2))),
               h("tr", { class: "total" }, h("td", null, "Toplam R / U"), h("td"), h("td"), h("td"), h("td", { class: "num" }, `${fmt(r.rTotal, 3)} / ${fmt(r.u, 3)}`)))),
-        h("p", null, lim != null ? `Sınır U (${d.zone}. bölge): ${fmt(lim, 3)} W/m²K → ${ok ? "sağlıyor" : "sağlamıyor"}.` : "Sınır değer girilmemiş."),
+        h("p", null, lim != null ? `Tavsiye U (${d.zone}. bölge${d.highGlazing ? ", cam oranı ≥ %60" : ""}): ${fmt(lim, 3)} W/m²K → ${ok ? "sağlıyor" : "sağlamıyor"}.` : "Tavsiye U değeri yok."),
         r.glaser && h("div", { class: "grid g2" }, this.sectionChart(el, r.glaser), this.glaserChart(el, r.glaser)),
         r.glaser && h("p", null, r.glaser.condensation.length
           ? `Yoğuşma: ${r.glaser.condensation.map(p => `${fmt(p.x * 100, 1)} cm'de ${fmt(p.rate, 3)} g/m²h`).join(", ")}.`
@@ -392,8 +431,8 @@ App.register({
     }
     printReport("Isı Yalıtım Hesap Raporu", h("div", { class: "stack" },
       h("p", null, `İklim bölgesi: ${d.zone ?? "seçilmedi"}. Yoğuşma koşulları: iç ${fmt(c.insideTemp, 1)} °C / %${fmt(c.insideRh, 0)}, dış ${fmt(c.outsideTemp, 1)} °C / %${fmt(c.outsideRh, 0)}.`),
-      App.settings.uLimits?.source && h("p", { class: "small" }, "Sınır değer kaynağı: " + App.settings.uLimits.source),
-      h("table", { class: "t" }, h("thead", null, h("tr", null, ["Eleman", "Tür", "U", "Sınır U", "Durum", "Yoğuşma"].map((x, i) => h("th", { class: i === 2 || i === 3 ? "num" : null }, x)))), h("tbody", null, summary)),
+      App.settings.uLimits?.source && h("p", { class: "small" }, "U değeri kaynağı: " + App.settings.uLimits.source),
+      h("table", { class: "t" }, h("thead", null, h("tr", null, ["Eleman", "Tür", "U", "Tavsiye U", "Durum", "Yoğuşma"].map((x, i) => h("th", { class: i === 2 || i === 3 ? "num" : null }, x)))), h("tbody", null, summary)),
       parts));
   },
 });
