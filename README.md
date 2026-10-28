@@ -1,6 +1,6 @@
 # MühendisKit
 
-**Belediyede kontrol ve hakediş yapan makine mühendisi için hepsi bir arada Windows uygulaması.**
+**Kontrol ve hakediş yapan Makine mühendisleri için hepsi bir arada Windows uygulaması.**
 Mekanik ve elektrik hesapları, TS 825 ısı yalıtımı, Bakanlık birim fiyatlarıyla yaklaşık maliyet, hakediş, AutoCAD gerektirmeyen DWG/DXF editörü ve 3B katı modelleme tek pencerede. Uygulama Claude'a MCP sunucusu olarak bağlanır; Claude açık pencereyi kullanarak hesap yapar, çizer ve metraj çıkarır.
 
 ![Ana sayfa](docs/screenshots/01-home.png)
@@ -54,8 +54,8 @@ Bu depo **özeldir**. Aşağıdaki veriler, sahiplerinin belediye içi ve ticari
 | Veri | Kaynak |
 |---|---|
 | Birim fiyatlar | ÇŞİDB Yüksek Fen Kurulu yıllık kitap ve aylık listeler (yfk.csb.gov.tr). Uygulama listeleri çalışırken indirir; depoda fiyat yoktur. |
-| TS 825:2024 tavsiye U değerleri | TSE standardı; değerler belediyenin gösterdiği tesisat.org TS 825 programından alındı |
-| İl iklim verileri, il yağış şiddetleri, doluluk oranına göre boru çapı yöntemi, atık su sarfiyat birimleri, pratik baca katsayıları | tesisat.org (Tesisat Online izniyle) |
+| TS 825:2024 tavsiye U değerleri | TSE standardı; değerler belediyenin gösterdiği açık kaynak |
+| İl iklim verileri, il yağış şiddetleri, doluluk oranına göre boru çapı yöntemi, atık su sarfiyat birimleri, pratik baca katsayıları | belediye açık kaynak |
 | Yangın suyu, yağmur suyu, hidrofor ölçütleri | mevzuat.gov.tr ve Resmî Gazete yönetmelik metinleri, ÇŞİDB Makina Tesisatı Genel Teknik Şartnamesi |
 
 Program standart değerlerini tahmin etmez. Kabul edilen değerler (ör. radyatör üssü n = 1,3) ekranda "kabul" olarak işaretlidir ve değiştirilebilir.
