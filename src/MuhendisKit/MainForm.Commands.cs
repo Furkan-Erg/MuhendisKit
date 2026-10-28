@@ -116,6 +116,8 @@ sealed partial class MainForm
                 return new { source = Cities.Source, cities = Cities.All };
             case "calc.gravityPipes":
                 return GravityPipes.Size(Arg<bool>(args, "rain"), Arg<int>(args, "slopeA"), Arg<double[]>(args, "values"));
+            case "calc.heatingChain":
+                return HeatingChain.Compute(Arg<HeatingChainInput>(args, "input"));
             case "calc.chimneyFuels":
                 return PracticalChimney.Coefficients;
             case "calc.chimney":
@@ -171,6 +173,37 @@ sealed partial class MainForm
                 if (open) OpenPath(path);
                 return path;
             }
+            case "est.compute":
+                return EstimateCalculator.Compute(Arg<Estimate>(args, "estimate"));
+            case "est.reprice":
+            {
+                var est = Arg<Estimate>(args, "estimate");
+                var changes = EstimateCalculator.Reprice(est, Catalog, Arg<string>(args, "source"), Opt<bool>(args, "apply"));
+                return new { changes, estimate = est };
+            }
+            case "est.export":
+            {
+                var est = Arg<Estimate>(args, "estimate");
+                string name = Opt<string?>(args, "name") ?? "Yaklaşık maliyet";
+                string? path = Opt<string?>(args, "path");
+                bool open = path is null;
+                if (path is null)
+                {
+                    using var dlg = new SaveFileDialog
+                    {
+                        Filter = "Excel çalışma kitabı (*.xlsx)|*.xlsx",
+                        FileName = Projects.SafeName($"{name} - Yaklaşık Maliyet") + ".xlsx",
+                        InitialDirectory = AppPaths.ProjectsDir,
+                    };
+                    if (dlg.ShowDialog(this) != DialogResult.OK) return null;
+                    path = dlg.FileName;
+                }
+                await Task.Run(() => EstimateExcel.Write(est, name, path));
+                if (open) OpenPath(path);
+                return path;
+            }
+            case "takeoff.suggest":
+                return Takeoff.Suggest(Arg<TakeoffRow[]>(args, "rows"), Arg<PozItem[]>(args, "items"), Opt<Dictionary<string, string>?>(args, "saved"));
             case "catalog.info":
                 return new
                 {

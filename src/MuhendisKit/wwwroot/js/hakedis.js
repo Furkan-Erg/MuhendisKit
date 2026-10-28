@@ -370,22 +370,4 @@ ${r.spec}` : r.description }, `${r.pozNo} · ${r.description}`),
   },
 
   // Called by the drawing viewer: adds quantities taken from a drawing as measurement lines.
-  importFromDrawing(rows) {
-    const j = this.job;
-    const v = { itemId: j.items[0]?.id, period: j.periods.at(-1)?.no ?? 1 };
-    if (!j.items.length) { toast("Önce Hakediş > Pozlar sekmesinden poz ekleyin", "bad"); return; }
-    const periodNos = j.periods.length ? j.periods.map(p => p.no) : [1];
-    modal("Metraja aktar", h("div", { class: "stack" },
-      h("p", { class: "muted" }, `${rows.length} kalem seçili. Hepsi seçtiğiniz poza ayrı satır olarak eklenir.`),
-      h("table", { class: "t" }, h("tbody", null, rows.map(r => h("tr", null, h("td", null, r.description), h("td", { class: "num" }, fmt(r.quantity, 3) + " " + r.unit))))),
-      selectField(v, "itemId", "Poz", j.items.map(i => ({ value: i.id, label: `${i.pozNo} ${i.description} (${i.unit})` }))),
-      selectField(v, "period", "Hakediş", periodNos.map(n => ({ value: n, label: n + " nolu" })))),
-      [btn("Vazgeç", closeOverlay), btn("Aktar", () => {
-        for (const r of rows)
-          j.lines.push({ id: uid(), itemId: v.itemId, period: Number(v.period), description: r.description, count: 1, width: null, length: null, height: null, fixed: Math.round(r.quantity * 1000) / 1000, deduct: false, source: r.source });
-        App.touch();
-        closeOverlay();
-        toast(`${rows.length} satır metraja eklendi`);
-      }, { cls: "primary" })], { wide: true });
-  },
 });

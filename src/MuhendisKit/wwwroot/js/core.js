@@ -407,6 +407,11 @@ function migrateProject(d) {
   j.contractAmount ??= 0; j.b ??= 0.9; j.pnDigits ??= 3; j.kdvRate ??= 20;
   j.deductions ??= [{ name: "Damga vergisi", ratePercent: 0.948, base: "tutar" }];
   j.items ??= []; j.lines ??= []; j.periods ??= []; j.indices ??= {};
+  d.estimate ??= {};
+  const e = d.estimate;
+  e.title ??= ""; e.preparedBy ??= ""; e.date ??= todayIso(); e.priceSource ??= ""; e.kdvRate ??= 20;
+  e.items ??= []; e.lines ??= [];
+  d.drawingMap ??= {};
   return d;
 }
 
@@ -491,7 +496,7 @@ async function printReport(title, body, opt = {}) {
 
 // ---- Automation (MCP server → host → here) ----
 // Each handler gets the args object and returns a JSON-able value; errors go back to Claude as text.
-const PROJECT_SECTIONS = ["info", "calcs", "insulation", "heatloss", "job"];
+const PROJECT_SECTIONS = ["info", "calcs", "insulation", "heatloss", "estimate", "job"];
 const AUTOMATION = {
   "ui.go": a => { App.go(a.page); return { page: a.page }; },
   "ui.state": () => ({ page: App.current?.id, project: App.project ? { path: App.project.path, name: App.project.data.name } : null }),
@@ -512,6 +517,8 @@ const AUTOMATION = {
     return { saved: App.project.path };
   },
   "hak.period": a => rpc("hak.period", { job: jobForHost(requireJob()), no: a.no }),
+  "est.compute": () => rpc("est.compute", { estimate: estimateForHost(requireProject().estimate) }),
+  "est.export": a => rpc("est.export", { estimate: estimateForHost(requireProject().estimate), name: App.project.data.name, path: a.path }),
   "hak.export": a => rpc("hak.export", { job: jobForHost(requireJob()), no: a.no, name: App.project.data.name, path: a.path }),
   "cad2d.open": async a => { App.go("cad"); await App.pageById.cad.open(a.path); return Cad2d.call("info"); },
   "cad2d.save": async a => {
@@ -533,6 +540,10 @@ const AUTOMATION = {
     return { path: await rpc("file.saveBase64", { base64, path: a.path }) };
   },
 };
+function requireProject() {
+  if (!App.project) throw new Error("Açık proje yok.");
+  return App.project.data;
+}
 function requireJob() {
   if (!App.project) throw new Error("Açık proje yok.");
   return App.project.data.job;

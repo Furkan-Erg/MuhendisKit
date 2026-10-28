@@ -674,8 +674,60 @@ App.register({
             h("tbody", null, res.map(r => h("tr", null, h("td", null, r.name),
               [r.transmissionW, r.incrementW, r.infiltrationW, r.totalW].map(x => h("td", { class: "num" }, fmt(x, 0))))),
               h("tr", { class: "total" }, h("td", null, "Toplam"), h("td"), h("td"), h("td"), h("td", { class: "num" }, fmt(total, 0))))))));
+        renderChain(res);
       } catch (e) { resultHost.append(note(e.message, "bad")); }
     }, 200);
+
+    // ---- Isıtma zinciri: room loads → radiators → pipes → pump ----
+    // 80/60 °C: the ministry's heating specification (MGTTS-03) rates boilers at this regime. Pipe limits are the same
+    // defaults as the pipe calculator and come from the project specification; the local-loss share is an assumption.
+    const ch = st.chain ??= { supplyC: 80, returnC: 60, exponent: 1.3, perUnit: null, material: "celik", maxV: 1.0, maxR: 150, length: null, local: 0.3, equipment: 20 };
+    const chainForm = h("div");
+    const chainResult = h("div", { class: "stack" });
+    const chainHost = h("div", { class: "card" }, h("div", { class: "card-head" }, icon("pipe"), h("h3", null, "Isıtma tesisatı zinciri"),
+      h("span", { class: "faint small" }, "Isı kaybı → radyatör → boru → pompa")), h("div", { class: "card-body stack" }, chainForm, chainResult));
+    let lastRooms = null;
+    const chainChanged = debounce(() => { if (App.project) App.touch(); renderChain(lastRooms); }, 200);
+    chainForm.append(h("div", { class: "fields" },
+      numField(ch, "supplyC", "Gidiş suyu", { unit: "°C", hint: "Bakanlık ısıtma şartnamesi: 80/60 °C rejimi", onChange: chainChanged }),
+      numField(ch, "returnC", "Dönüş suyu", { unit: "°C", onChange: chainChanged }),
+      numField(ch, "exponent", "Radyatör üssü n", { hint: "Katalogdan; 1,3 kabul", onChange: chainChanged }),
+      numField(ch, "perUnit", "Katalog ΔT50 verimi (isteğe bağlı)", { unit: "W / m, dilim", onChange: chainChanged }),
+      selectField(ch, "material", "Boru malzemesi", PIPE_MATERIALS, { onChange: chainChanged }),
+      numField(ch, "maxV", "Azami hız", { unit: "m/s", hint: "Şartnameye göre", onChange: chainChanged }),
+      numField(ch, "maxR", "Azami basınç kaybı", { unit: "Pa/m", hint: "Şartnameye göre", onChange: chainChanged }),
+      numField(ch, "length", "Kritik devre boyu (gidiş + dönüş)", { unit: "m", onChange: chainChanged }),
+      numField(ch, "local", "Yerel kayıp oranı", { hint: "Sürekli kaybın oranı; 0,3 = %30 kabul", onChange: chainChanged }),
+      numField(ch, "equipment", "Kazan, vana vb. kayıplar", { unit: "kPa", hint: "Üretici verilerinden", onChange: chainChanged })));
+    async function renderChain(res) {
+      lastRooms = res;
+      clear(chainResult);
+      if (!res?.length) { chainResult.append(h("div", { class: "faint small" }, "Mahal ısı kayıpları hesaplanınca zincir burada çıkar.")); return; }
+      let r;
+      try {
+        r = await rpc("calc.heatingChain", { input: {
+          rooms: res.map((x, i) => ({ name: x.name, heatW: x.totalW, roomC: st.rooms[i]?.insideTemp ?? null })),
+          supplyC: ch.supplyC ?? 0, returnC: ch.returnC ?? 0, roomC: st.insideTemp ?? 20, exponent: ch.exponent ?? 1.3, catalogPerUnitW: ch.perUnit,
+          material: ch.material, maxVelocity: ch.maxV ?? 0, maxPressureDrop: ch.maxR ?? 0, criticalLengthM: ch.length ?? 0, localLossFactor: ch.local ?? 0, equipmentKPa: ch.equipment ?? 0,
+        } });
+      } catch (e) { chainResult.append(note(e.message, "bad")); return; }
+      const pipe = p => p.size ? `${p.size}` : "uygun çap yok";
+      chainResult.append(
+        h("div", { class: "stats" },
+          stat("Toplam yük", fmt(r.totalHeatW / 1000, 2), "kW"),
+          stat("Toplam debi", fmt(r.main.flowM3h, 3), "m³/h"),
+          stat("Ana boru", pipe(r.main), null, r.main.size ? null : "bad"),
+          stat("Pompa", `${fmt(r.pump.flowM3h, 2)} m³/h · ${fmt(r.pump.headM, 2)} mSS`, null, "hero")),
+        h("div", { class: "table-wrap" }, h("table", { class: "t" },
+          h("thead", null, h("tr", null, ["Mahal", "Isı yükü (W)", "Radyatör ΔT50 (W)", ch.perUnit ? "Miktar" : null, "Debi (m³/h)", "Branşman", "Hız (m/s)", "R (Pa/m)"]
+            .filter(Boolean).map((x, i) => h("th", { class: i ? "num" : null }, x)))),
+          h("tbody", null, r.rooms.map(x => h("tr", null, h("td", null, x.name), h("td", { class: "num" }, fmt(x.heatW, 0)), h("td", { class: "num" }, h("b", null, fmt(x.requiredNominalW, 0))),
+            ch.perUnit ? h("td", { class: "num" }, fmt(x.units, 2)) : null,
+            h("td", { class: "num" }, fmt(x.pipe.flowM3h, 3)), h("td", { class: "num" }, pipe(x.pipe)),
+            h("td", { class: "num" }, x.pipe.velocity != null ? fmt(x.pipe.velocity, 2) : "—"), h("td", { class: "num" }, x.pipe.pressureDropPaM != null ? fmt(x.pipe.pressureDropPaM, 0) : "—")))))),
+        h("div", { class: "formula" }, `Pompa basma yüksekliği = R·L + yerel kayıplar + ekipman = ${fmt(r.pump.pipeLossKPa, 2)} + ${fmt(r.pump.localLossKPa, 2)} + ${fmt(r.pump.equipmentKPa, 2)} = ${fmt(r.pump.headKPa, 2)} kPa ≈ ${fmt(r.pump.headM, 2)} mSS`),
+        r.notes.map(n => note(n)));
+    }
 
     const renderRooms = () => {
       clear(roomsHost).append(st.rooms.map((r, ri) => {
@@ -722,7 +774,9 @@ App.register({
     panel.append(roomsHost);
     panel.append(h("div", null, btn("Mahal ekle", () => { st.rooms.push(newRoom()); renderRooms(); changed(); }, { cls: "primary", icon: "plus" })));
     panel.append(h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "Sonuç")), h("div", { class: "card-body" }, resultHost)));
+    panel.append(chainHost);
     panel.append(h("div", { class: "card card-pad stack" }, h("h3", null, "Yöntem"), h("div", { class: "formula" }, c.formula)));
+    renderChain(null);
     renderRooms();
     recalc();
   },

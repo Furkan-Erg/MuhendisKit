@@ -141,9 +141,9 @@ App.register({
     const render = () => {
       const f = UNIT_FACTORS[st.unit];
       const items = [
-        ...info.layers.filter(l => l.length > 1e-9).map(l => ({ key: "L:" + l.layer, group: "Katman uzunlukları", description: `${l.layer} katmanı toplam uzunluk`, quantity: l.length * f, unit: "m", source: `Çizim: ${this.file?.name ?? "çizim"} / ${l.layer}` })),
-        ...info.layers.filter(l => l.closed > 0).map(l => ({ key: "A:" + l.layer, group: "Kapalı alanlar", description: `${l.layer} katmanı kapalı alanlar (${l.closed} adet)`, quantity: l.closedArea * f * f, unit: "m²", source: `Çizim: ${this.file?.name ?? "çizim"} / ${l.layer}` })),
-        ...info.blocks.map(b => ({ key: "B:" + b.block + "|" + b.layer, group: "Blok sayıları", description: `${b.block} bloğu (${b.layer})`, quantity: b.count, unit: "adet", source: `Çizim: ${this.file?.name ?? "çizim"} / blok ${b.block}` })),
+        ...info.layers.filter(l => l.length > 1e-9).map(l => ({ key: "L:" + l.layer, kind: "length", name: l.layer, layer: l.layer, group: "Katman uzunlukları", description: `${l.layer} katmanı toplam uzunluk`, quantity: l.length * f, unit: "m", source: `Çizim: ${this.file?.name ?? "çizim"} / ${l.layer} uzunluk` })),
+        ...info.layers.filter(l => l.closed > 0).map(l => ({ key: "A:" + l.layer, kind: "area", name: l.layer, layer: l.layer, group: "Kapalı alanlar", description: `${l.layer} katmanı kapalı alanlar (${l.closed} adet)`, quantity: l.closedArea * f * f, unit: "m²", source: `Çizim: ${this.file?.name ?? "çizim"} / ${l.layer} alan` })),
+        ...info.blocks.map(b => ({ key: "B:" + b.block + "|" + b.layer, kind: "count", name: b.block, layer: b.layer, group: "Blok sayıları", description: `${b.block} bloğu (${b.layer})`, quantity: b.count, unit: "adet", source: `Çizim: ${this.file?.name ?? "çizim"} / blok ${b.block} (${b.layer})` })),
       ];
       this.metrajItems = items;
       const groups = [...new Set(items.map(i => i.group))];
@@ -162,12 +162,77 @@ App.register({
         !UNIT_FROM_HEADER[info.units] && note("Çizimde birim tanımlı değil; doğru birimi seçin.", "warn"),
         h("div", { class: "faint small" }, `${info.entityCount.toLocaleString(TR)} nesne · ${info.version}`)),
       rowsHost,
-      h("div", { class: "card-body" }, btn("Seçilenleri hakedişe aktar", () => {
-        const rows = this.metrajItems.filter(i => picked.has(i.key));
-        if (!rows.length) { toast("Önce satır seçin", "bad"); return; }
-        if (!App.project) { toast("Hakedişe aktarmak için bir proje açın", "bad"); return; }
-        App.pageById.hak.importFromDrawing(rows);
-      }, { cls: "primary", icon: "receipt" })));
+      h("div", { class: "card-body row wrap" },
+        h("button", { class: "btn ghost sm", onclick: () => { this.metrajItems.forEach(i => picked.add(i.key)); render(); } }, "Tümünü seç"),
+        btn("Pozlarla eşleştir ve aktar", () => {
+          const rows = this.metrajItems.filter(i => picked.has(i.key));
+          if (!rows.length) { toast("Önce satır seçin", "bad"); return; }
+          if (!App.project) { toast("Aktarmak için bir proje açın", "bad"); return; }
+          this.transferDialog(rows);
+        }, { cls: "primary", icon: "receipt" })));
     render();
+  },
+
+  // Drawing quantities → measurement lines of the estimate or of a hakediş period. Each row gets a poz (suggested from
+  // the project's earlier choices and from the layer/block name); a row already taken from the same drawing source is
+  // updated instead of added again, so re-measuring a revised drawing does not double the quantities.
+  async transferDialog(rows) {
+    const d = App.project.data;
+    const v = { target: this.transferTarget ?? (d.estimate.items.length || !d.job.items.length ? "est" : "hak"), period: d.job.periods.at(-1)?.no ?? 1 };
+    const host = h("div", { class: "stack" });
+    const choice = {};
+    const targetData = () => v.target === "est" ? d.estimate : d.job;
+    const draw = async () => {
+      const t = targetData();
+      clear(host);
+      if (!t.items.length) { host.append(note(v.target === "est" ? "Yaklaşık maliyette poz yok: önce Pozlar sekmesinden ekleyin." : "Hakedişte poz yok: önce Pozlar sekmesinden ekleyin.", "warn")); return; }
+      let sugg = [];
+      try {
+        sugg = await rpc("takeoff.suggest", {
+          rows: rows.map(r => ({ key: r.key, kind: r.kind, name: r.name, layer: r.layer, quantity: r.quantity })),
+          items: t.items.map(i => ({ id: i.id, pozNo: i.pozNo ?? "", description: i.description ?? "", unit: i.unit ?? "", unitPrice: i.unitPrice ?? 0 })),
+          saved: d.drawingMap,
+        });
+      } catch (e) { fail(e); }
+      const opts = [{ value: null, label: "— aktarma —" }, ...t.items.map(i => ({ value: i.id, label: `${i.pozNo} ${i.description}`.slice(0, 80) + ` (${i.unit})` }))];
+      host.append(h("div", { class: "table-wrap", style: { maxHeight: "50vh" } }, h("table", { class: "t" },
+        h("thead", null, h("tr", null, h("th", null, "Çizimden"), h("th", { class: "num" }, "Miktar"), h("th", null, "Poz"))),
+        h("tbody", null, rows.map(r => {
+          const s = sugg.find(x => x.key === r.key);
+          choice[r.key] ??= { itemId: s?.itemId ?? null };
+          const sel = selectField(choice[r.key], "itemId", null, opts, { bare: true });
+          sel.style.maxWidth = "360px";
+          return h("tr", null, h("td", null, r.description), h("td", { class: "num" }, `${fmt(r.quantity, r.unit === "adet" ? 0 : 2)} ${r.unit}`),
+            h("td", null, h("div", { class: "row" }, sel, s?.reason && h("span", { class: "badge" + (s.reason === "saved" ? " ok" : "") }, s.reason === "saved" ? "önceki seçim" : "öneri"))));
+        })))));
+    };
+    const go = () => {
+      const t = targetData();
+      let added = 0, updated = 0;
+      for (const r of rows) {
+        const itemId = choice[r.key]?.itemId;
+        if (!itemId) continue;
+        const item = t.items.find(i => i.id === itemId);
+        d.drawingMap[r.key] = item?.pozNo ?? "";
+        const qty = Math.round(r.quantity * 1000) / 1000;
+        const period = Number(v.period);
+        const same = t.lines.find(l => l.source === r.source && l.itemId === itemId && (v.target === "est" || l.period === period));
+        if (same) { same.fixed = qty; same.count = 1; same.width = same.length = same.height = null; updated++; continue; }
+        const line = { id: uid(), itemId, description: r.description, count: 1, width: null, length: null, height: null, fixed: qty, deduct: false, source: r.source };
+        if (v.target === "hak") line.period = period;
+        t.lines.push(line); added++;
+      }
+      this.transferTarget = v.target;
+      App.touch(); closeOverlay();
+      toast(`${added} satır eklendi, ${updated} satır güncellendi (${v.target === "est" ? "yaklaşık maliyet" : `${v.period} nolu hakediş`})`);
+    };
+    const periodNos = d.job.periods.length ? d.job.periods.map(p => p.no) : [1];
+    const head = h("div", { class: "fields" },
+      selectField(v, "target", "Hedef", [{ value: "est", label: "Yaklaşık maliyet" }, { value: "hak", label: "Hakediş metrajı" }], { onChange: () => { Object.keys(choice).forEach(k => delete choice[k]); head.querySelector(".period-field").hidden = v.target !== "hak"; draw(); } }),
+      (() => { const f = selectField(v, "period", "Hakediş", periodNos.map(n => ({ value: n, label: n + " nolu" }))); f.classList.add("period-field"); f.hidden = v.target !== "hak"; return f; })());
+    modal("Çizimden metraja aktar", h("div", { class: "stack" }, head, host,
+      h("div", { class: "faint small" }, "Pozun birimi miktarla uyumlu olmalı (uzunluk → m, alan → m², blok → adet). Seçimler projede saklanır; aynı katman bir dahaki sefere aynı poza önerilir.")),
+      [btn("Vazgeç", closeOverlay), btn("Aktar", go, { cls: "primary" })], { wide: true });
+    draw();
   },
 });

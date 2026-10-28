@@ -4,8 +4,8 @@ namespace MuhendisKit.Core.Hakedis;
 
 public static class ExcelExport
 {
-    const string MoneyFmt = "#,##0.00";
-    const string QtyFmt = "#,##0.000";
+    internal const string MoneyFmt = "#,##0.00";
+    internal const string QtyFmt = "#,##0.000";
 
     public static void Write(Job job, string projectName, int periodNo, string path)
     {
@@ -117,13 +117,13 @@ public static class ExcelExport
         wb.SaveAs(path);
     }
 
-    static void Title(IXLWorksheet ws, string text, int cols)
+    internal static void Title(IXLWorksheet ws, string text, int cols)
     {
         ws.Cell(1, 1).Value = text;
         ws.Range(1, 1, 1, cols).Merge().Style.Font.SetBold().Font.SetFontSize(13);
     }
 
-    static void Header(IXLWorksheet ws, int row, string[] cols)
+    internal static void Header(IXLWorksheet ws, int row, string[] cols)
     {
         for (int i = 0; i < cols.Length; i++) ws.Cell(row, i + 1).Value = cols[i];
         var range = ws.Range(row, 1, row, cols.Length);
@@ -132,7 +132,7 @@ public static class ExcelExport
         range.Style.Alignment.WrapText = true;
     }
 
-    static void Widths(IXLWorksheet ws, params double[] w)
+    internal static void Widths(IXLWorksheet ws, params double[] w)
     {
         for (int i = 0; i < w.Length; i++) ws.Column(i + 1).Width = w[i];
     }

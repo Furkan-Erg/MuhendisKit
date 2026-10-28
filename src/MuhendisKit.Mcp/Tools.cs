@@ -59,6 +59,8 @@ public sealed class Tools(AppClient app)
                          layers: [{ id, name, thickness (cm), lambda (W/mK), mu, fixedR (m²K/W) | null, insulation: bool }], fixedU (windows) }] }
         - heatloss: { insideTemp, outsideTemp, rooms: [{ id, name, volume m³, n 1/h, increment %, insideTemp | null,
                       surfaces: [{ id, name, area m², u W/m²K, dt K | null (null = Ti − Td) }] }] }
+        - estimate (yaklaşık maliyet): { title, preparedBy, date, priceSource, kdvRate, items: [{ id, pozNo, description, unit, unitPrice }],
+            lines: [{ id, itemId, description, count, width, length, height, fixed, deduct, source }], drawingMap: { takeoffKey: pozNo } }
         - job (hakediş): { owner, contractor, contractNo, tenderMonth "yyyy-MM", contractAmount, b, pnDigits, kdvRate %,
             deductions: [{ name, ratePercent, base: tutar|kdv|toplam }],
             items: [{ id, pozNo, description, unit, unitPrice }],
@@ -66,7 +68,7 @@ public sealed class Tools(AppClient app)
             periods: [{ no, date "yyyy-MM-dd", month "yyyy-MM", allowanceMonth | null, note }],
             indices: { "yyyy-MM": index value } }
         """)]
-    public async Task<string> ProjectGet([Description("Optional: info, calcs, insulation, heatloss, job")] string? section = null, CancellationToken ct = default) =>
+    public async Task<string> ProjectGet([Description("Optional: info, calcs, insulation, heatloss, estimate, job")] string? section = null, CancellationToken ct = default) =>
         Text(await app.CallAsync("project.get", new { section }, ct));
 
     [McpServerTool(Name = "project_update"), Description("""
@@ -74,7 +76,7 @@ public sealed class Tools(AppClient app)
         Read the section first, change what you need, write the whole section back. New ids: any unique string.
         Never invent standard values (TS 825 limits, TS 2164 design temperatures, unit prices, indices): ask the engineer or leave them empty.
         """)]
-    public async Task<string> ProjectUpdate([Description("name, info, calcs, insulation, heatloss or job")] string section,
+    public async Task<string> ProjectUpdate([Description("name, info, calcs, insulation, heatloss, estimate or job")] string section,
         [Description("The complete new value of the section")] JsonElement value, CancellationToken ct) =>
         Text(await app.CallAsync("project.update", new { section, value = Json(value) }, ct));
 
@@ -110,9 +112,12 @@ public sealed class Tools(AppClient app)
           fixture SB values: hela taşı 10, duş 4, lavabo 1–2, bide 2, pisuvar 4, döşeme süzgeci 2–10
         - chimney: { capacityKcalh, heightM, fuelGroup: "Katı Yakıtlı"|"Sıvı Yakıtlı"|"Gaz Yakıtlı", fuel (e.g. Doğalgaz, Kömür, Mazot) }
           → practical section Fb = k·Q/√H and diameter (tesisat.org); only for small appliances (gas 30–70 kW), larger → TS 2165 / TS EN 13384-1
+        - heating_chain: { rooms: [{ name, heatW, roomC? }], supplyC (80), returnC (60), roomC, exponent (catalogue n), catalogPerUnitW?, material: celik|bakir|ppr,
+          maxVelocity, maxPressureDrop (Pa/m), criticalLengthM (gidiş+dönüş), localLossFactor (e.g. 0.3), equipmentKPa }
+          → per room ΔT50 radiator output, flow and branch pipe; main pipe; pump flow and head (pre-sizing)
         Design limits (max velocity, pressure drop, allowed gas drop, outside design temperature) come from the project specification: ask, don't assume.
         """)]
-    public async Task<string> Calculate([Description("pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes, fixture_units or chimney")] string kind,
+    public async Task<string> Calculate([Description("pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes, fixture_units, chimney or heating_chain")] string kind,
         [Description("Input object for that kind")] JsonElement input, CancellationToken ct)
     {
         input = Json(input);
@@ -135,7 +140,8 @@ public sealed class Tools(AppClient app)
             "gravity_pipes" => ("host.calc.gravityPipes", input),
             "fixture_units" => ("host.calc.fixtureUnits", input),
             "chimney" => ("host.calc.chimney", new { input }),
-            _ => throw new McpAppException("kind: pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes, fixture_units veya chimney olmalı."),
+            "heating_chain" => ("host.calc.heatingChain", new { input }),
+            _ => throw new McpAppException("kind: pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes, fixture_units, chimney veya heating_chain olmalı."),
         };
         return Text(await app.CallAsync(cmd, args, ct));
     }
@@ -163,6 +169,13 @@ public sealed class Tools(AppClient app)
     public async Task<string> InsulationEvaluate(JsonElement element, JsonElement? climate = null, double? targetU = null,
         int? insulationLayer = null, CancellationToken ct = default) =>
         Text(await app.CallAsync("host.ins.evaluate", new { element = Json(element), climate = climate is { } c ? Json(c) : (JsonElement?)null, targetU, insulationLayer }, ct));
+
+    [McpServerTool(Name = "estimate_compute", ReadOnly = true), Description("Yaklaşık maliyet of the open project: quantity and amount per poz, totals by discipline (inşaat/mekanik/elektrik), KDV, warnings (missing prices or quantities).")]
+    public async Task<string> EstimateCompute(CancellationToken ct) => Text(await app.CallAsync("est.compute", null, ct));
+
+    [McpServerTool(Name = "estimate_export_excel"), Description("Writes the open project's yaklaşık maliyet to an Excel workbook (İcmal, Yaklaşık Maliyet, Metraj sheets).")]
+    public async Task<string> EstimateExportExcel([Description("Full .xlsx path")] string path, CancellationToken ct) =>
+        Text(await app.CallAsync("est.export", new { path }, ct));
 
     [McpServerTool(Name = "hakedis_compute", ReadOnly = true), Description("Computes progress payment no. N of the open project: item quantities and amounts, cumulative/previous/this period, price difference F = An × B × (Pn − 1), VAT, deductions, payable, warnings.")]
     public async Task<string> HakedisCompute([Description("Payment (period) number")] int period, CancellationToken ct) =>
