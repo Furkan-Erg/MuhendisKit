@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MuhendisKit.Core/MuhendisKit.Core.csproj" />
+    <Project Path="src/MuhendisKit.Mcp/MuhendisKit.Mcp.csproj" />
+    <Project Path="src/MuhendisKit/MuhendisKit.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MuhendisKit.Core.Tests/MuhendisKit.Core.Tests.csproj" />
+  </Folder>
+</Solution>

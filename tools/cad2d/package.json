@@ -1,0 +1,40 @@
+{
+  "name": "muhendiskit-cad2d",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "description": "2B çizim modülü: MLightCAD editörü (MIT) + MühendisKit köprüsü. Çıktı: src/MuhendisKit/wwwroot/cad2d",
+  "type": "module",
+  "scripts": {
+    "build": "vue-tsc --noEmit && vite build",
+    "dev": "vite"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.8",
+    "typescript": "5.9.3",
+    "vite": "6.4.3",
+    "vite-plugin-static-copy": "4.1.1",
+    "vue-tsc": "2.2.12"
+  },
+  "dependencies": {
+    "@mlightcad/cad-agent-core": "1.7.7",
+    "@mlightcad/cad-agent-plugin": "1.7.7",
+    "@mlightcad/cad-google-drive-plugin": "1.7.7",
+    "@mlightcad/cad-html-plugin": "1.7.7",
+    "@mlightcad/cad-onedrive-plugin": "1.7.7",
+    "@mlightcad/cad-pdf-plugin": "1.7.7",
+    "@mlightcad/cad-script-plugin": "1.7.7",
+    "@mlightcad/cad-simple-viewer": "1.7.7",
+    "@mlightcad/cad-svg-plugin": "1.7.7",
+    "@mlightcad/cad-viewer": "1.7.7",
+    "@mlightcad/data-model": "1.15.14",
+    "@mlightcad/libredwg-converter": "3.15.14",
+    "@mlightcad/pdf-renderer": "1.7.7",
+    "@mlightcad/three-renderer": "1.7.7",
+    "@vueuse/core": "11.3.0",
+    "element-plus": "2.12.0",
+    "lodash-es": "4.17.21",
+    "three": "0.186.1",
+    "vue": "3.5.22",
+    "vue-i18n": "11.4.4"
+  }
+}

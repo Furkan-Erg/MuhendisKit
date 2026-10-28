@@ -1,0 +1,12 @@
+bin/
+obj/
+dist/
+node_modules/
+*.user
+.vs/
+
+# Built web modules (tools/build-web.ps1) and the upstream Chili3D checkout
+src/MuhendisKit/wwwroot/cad2d/
+src/MuhendisKit/wwwroot/cad3d/
+tools/cad3d/.src/
+publish/
