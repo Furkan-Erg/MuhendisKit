@@ -24,7 +24,7 @@ App.register({
     const d = p?.data;
     const tiles = [
       { id: "calc", icon: "calc", title: "Mekanik ve elektrik hesaplar", desc: "Isı kaybı, radyatör, boru ve kanal çapı, genleşme tankı, doğalgaz, hidrofor, yağmur ve atık su, yangın suyu, gerilim düşümü, kompanzasyon.", foot: d ? `${d.calcs.length} kayıtlı hesap` : "Proje gerektirmez" },
-      { id: "ins", icon: "wall", title: "Isı yalıtımı", desc: "Katman katman U değeri, TS 825 sınır kontrolü, Glaser yoğuşma analizi.", foot: d ? `${d.insulation.elements.length} yapı elemanı` : "Proje gerekir" },
+      { id: "ins", icon: "wall", title: "Isı yalıtımı", desc: "Katman katman U değeri, TS 825 tavsiye U kontrolü, Glaser yoğuşma analizi.", foot: d ? `${d.insulation.elements.length} yapı elemanı` : "Proje gerekir" },
       { id: "est", icon: "file", title: "Yaklaşık maliyet", desc: "Bakanlık pozlarıyla keşif, metraj, iş grubu icmali, ay ay yeniden fiyatlama, Excel çıktısı.", foot: d ? `${d.estimate.items.length} poz` : "Proje gerekir" },
       { id: "hak", icon: "receipt", title: "Hakediş", desc: "Poz, metraj (yeşil defter), hakediş icmali, fiyat farkı ve Excel çıktısı.", foot: d ? `${d.job.items.length} poz · ${d.job.periods.length} hakediş` : "Proje gerekir" },
       { id: "cad", icon: "drawing", title: "Çizim (2B)", desc: "DWG/DXF açma ve çizme, katmanlar, ölçülendirme, çizimden metraj.", foot: "AutoCAD gerekmez" },

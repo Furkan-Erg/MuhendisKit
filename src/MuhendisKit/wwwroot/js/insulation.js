@@ -129,7 +129,7 @@ App.register({
     const el = clear(this.el);
     el.append(h("div", { class: "page-head" },
       h("div", { class: "grow" }, h("h1", null, "Isı yalıtımı"),
-        h("div", { class: "sub" }, "Katman katman U değeri, TS 825 sınır kontrolü ve Glaser yöntemiyle yoğuşma analizi.")),
+        h("div", { class: "sub" }, "Katman katman U değeri, TS 825 tavsiye U kontrolü ve Glaser yöntemiyle yoğuşma analizi.")),
       App.project && btn("Rapor (PDF)", () => this.report(), { icon: "pdf" })));
     if (App.requireProject(el.appendChild(h("div")), "Yapı elemanları")) return;
     const d = this.data;
