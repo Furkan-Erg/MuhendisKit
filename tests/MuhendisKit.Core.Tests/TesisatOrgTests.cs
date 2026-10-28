@@ -60,3 +60,21 @@ public class TesisatOrgTests
         Assert.Equal(30.8, r.FlowLps, 6);
     }
 }
+
+public class PracticalChimneyTests
+{
+    [Theory]
+    // tesisat.org results: 50 000 kcal/h, 10 m, doğalgaz → 15,54 cm; 120 000, 18 m, kömür → 37,95; 30 000, 6 m, mazot → 16,75
+    [InlineData(50000, 10, "Gaz Yakıtlı", "Doğalgaz", 15.54)]
+    [InlineData(120000, 18, "Katı Yakıtlı", "Kömür", 37.95)]
+    [InlineData(30000, 6, "Sıvı Yakıtlı", "Mazot", 16.75)]
+    public void MatchesSite(double q, double h, string group, string fuel, double diameterCm)
+    {
+        var r = PracticalChimney.Size(new ChimneyInput(q, h, group, fuel));
+        Assert.Equal(diameterCm, Math.Round(r.DiameterCm, 2));
+    }
+
+    [Fact]
+    public void WarnsAboveSeventyKilowatts() =>
+        Assert.Contains("TS 2165", PracticalChimney.Size(new ChimneyInput(70 * PracticalChimney.KcalhPerKw, 10, "Gaz Yakıtlı", "Doğalgaz")).Warning);
+}

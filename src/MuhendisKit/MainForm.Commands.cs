@@ -116,6 +116,10 @@ sealed partial class MainForm
                 return new { source = Cities.Source, cities = Cities.All };
             case "calc.gravityPipes":
                 return GravityPipes.Size(Arg<bool>(args, "rain"), Arg<int>(args, "slopeA"), Arg<double[]>(args, "values"));
+            case "calc.chimneyFuels":
+                return PracticalChimney.Coefficients;
+            case "calc.chimney":
+                return PracticalChimney.Size(Arg<ChimneyInput>(args, "input"));
             case "calc.fixtures":
                 return WasteFixtureUnits.Fixtures;
             case "calc.fixtureUnits":

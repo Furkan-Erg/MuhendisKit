@@ -108,9 +108,11 @@ public sealed class Tools(AppClient app)
           → DN per line, as tesisat.org's doluluk-oranı tool (DIN 1986-100, Prandtl–Colebrook kb 1 mm); null DN = hidrolik hesap gerekir
         - fixture_units: { horizontal, roughness: 0.35|0.25, slopeA: 100|50, values: [sarfiyat birimi per line] } → DN by SB (tesisat.org atık su tablosu);
           fixture SB values: hela taşı 10, duş 4, lavabo 1–2, bide 2, pisuvar 4, döşeme süzgeci 2–10
+        - chimney: { capacityKcalh, heightM, fuelGroup: "Katı Yakıtlı"|"Sıvı Yakıtlı"|"Gaz Yakıtlı", fuel (e.g. Doğalgaz, Kömür, Mazot) }
+          → practical section Fb = k·Q/√H and diameter (tesisat.org); only for small appliances (gas 30–70 kW), larger → TS 2165 / TS EN 13384-1
         Design limits (max velocity, pressure drop, allowed gas drop, outside design temperature) come from the project specification: ask, don't assume.
         """)]
-    public async Task<string> Calculate([Description("pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes or fixture_units")] string kind,
+    public async Task<string> Calculate([Description("pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes, fixture_units or chimney")] string kind,
         [Description("Input object for that kind")] JsonElement input, CancellationToken ct)
     {
         input = Json(input);
@@ -132,7 +134,8 @@ public sealed class Tools(AppClient app)
             "booster" => ("host.calc.booster", new { input }),
             "gravity_pipes" => ("host.calc.gravityPipes", input),
             "fixture_units" => ("host.calc.fixtureUnits", input),
-            _ => throw new McpAppException("kind: pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes veya fixture_units olmalı."),
+            "chimney" => ("host.calc.chimney", new { input }),
+            _ => throw new McpAppException("kind: pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes, fixture_units veya chimney olmalı."),
         };
         return Text(await app.CallAsync(cmd, args, ct));
     }

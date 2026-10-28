@@ -398,6 +398,32 @@ const CALCS = [
     summary: (r, v) => `${v.horizontal ? "Yatay" : "Kolon"}: ` + r.map(l => `${fmt(l.sb, 0)} SB → ${l.dn ? "Ø" + l.dn : "hidrolik"}`).join(", "),
   },
   {
+    id: "chimney", title: "Baca çapı (pratik)", icon: "flame", keywords: "baca çapı kesit kazan doğal çekiş kombi",
+    desc: "Doğal çekişli bacalarda yakıt, yükseklik ve kazan kapasitesine göre yaklaşık baca kesiti (tesisat.org pratik baca hesabı). Ön boyutlandırma içindir.",
+    formula: "Fb = k · Q / √H   (Q kcal/h, H m, Fb cm²)\nD = √(4 · Fb / π)   (cm)\nDoğalgazda 30–70 kW için; 70 kW ve üzeri TS 2165 (DIN 4705) / TS EN 13384-1",
+    init: () => ({ kw: 50, h: 10, group: "Gaz Yakıtlı", fuel: "Doğalgaz" }),
+    async form(v, go) {
+      const fuels = CALC_TABLES.chimney ??= await rpc("calc.chimneyFuels");
+      if (!fuels[v.group]?.[v.fuel]) v.fuel = Object.keys(fuels[v.group])[0];
+      return h("div", { class: "fields" },
+        numField(v, "kw", "Kazan kapasitesi", { unit: "kW", hint: v.kw ? `${fmt(v.kw * 859.845, 0)} kcal/h` : null, onChange: () => go(true) }),
+        numField(v, "h", "Bina (baca) yüksekliği", { unit: "m", onChange: go }),
+        selectField(v, "group", "Yakıt sistemi", Object.keys(fuels).map(g => ({ value: g, label: g })), { onChange: () => go(true) }),
+        selectField(v, "fuel", "Yakıt", Object.entries(fuels[v.group]).map(([f, k]) => ({ value: f, label: `${f} (k = ${fmt(k, 3)})` })), { onChange: go }));
+    },
+    compute: v => rpc("calc.chimney", { input: { capacityKcalh: v.kw * 859.845, heightM: v.h, fuelGroup: v.group, fuel: v.fuel } }),
+    view(r) {
+      return [
+        h("div", { class: "stats" },
+          stat("Katsayı k", fmt(r.k, 3)),
+          stat("Kesit Fb", fmt(r.sectionCm2, 0), "cm²"),
+          stat("Baca iç çapı", fmt(r.diameterCm, 1), "cm", "hero")),
+        r.warning && note(r.warning, "warn"),
+      ];
+    },
+    summary: (r, v) => `${fmt(v.kw, 0)} kW, H ${fmt(v.h, 1)} m, ${v.fuel} → Ø${fmt(r.diameterCm, 1)} cm`,
+  },
+  {
     id: "vdrop", title: "Gerilim düşümü ve kesit", icon: "bolt", keywords: "elektrik kablo kesit gerilim düşümü linye kolon",
     desc: "Aktif güç ile omik gerilim düşümü; her standart kesit için % düşüm ve sınırı sağlayan en küçük kesit.",
     formula: "Monofaze: %e = 200 · L · P / (k · S · U²)\nTrifaze:  %e = 100 · L · P / (k · S · U²)\n(P W, L tek yön m, S mm², U V; k bakır 56, alüminyum 35 m/Ωmm²)",
@@ -627,7 +653,7 @@ App.register({
 
     const recalc = debounce(async () => {
       clear(resultHost);
-      if (st.outsideTemp == null) { resultHost.append(note("Dış hesap sıcaklığını girin (TS 2164 / proje şartnamesi).", "warn")); return; }
+      if (st.outsideTemp == null) { resultHost.append(note("İl seçin ya da dış hesap sıcaklığını girin.", "warn")); return; }
       if (!st.rooms.length) return;
       const rooms = st.rooms.map(r => {
         const ti = r.insideTemp ?? st.insideTemp;
