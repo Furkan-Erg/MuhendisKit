@@ -112,6 +112,14 @@ sealed partial class MainForm
                 return Radiator.Size(Arg<RadiatorInput>(args, "input"));
             case "calc.booster":
                 return Booster.Size(Arg<BoosterInput>(args, "input"));
+            case "calc.cities":
+                return new { source = Cities.Source, cities = Cities.All };
+            case "calc.gravityPipes":
+                return GravityPipes.Size(Arg<bool>(args, "rain"), Arg<int>(args, "slopeA"), Arg<double[]>(args, "values"));
+            case "calc.fixtures":
+                return WasteFixtureUnits.Fixtures;
+            case "calc.fixtureUnits":
+                return WasteFixtureUnits.Size(Arg<bool>(args, "horizontal"), Opt<double>(args, "roughness"), Opt<int>(args, "slopeA"), Arg<double[]>(args, "values"));
 
             // ---- insulation ----
             case "ins.evaluate":

@@ -103,9 +103,14 @@ public sealed class Tools(AppClient app)
         - radiator: { heatW, supplyC, returnC, roomC, exponent (catalogue n), catalogPerUnitW? } → required ΔT50 (EN 442) output and units
         - booster: { flowM3h (peak), heightM, lossBar, tapPressureBar (spec: 1), differentialBar, startsPerHour, pumps=1, lowestFixtureBelowM=0 }
           → hidrofor cut-in/out pressure, membrane tank volume, checks against the ministry's spec (static 1–4 bar, zone ≤ 60 m)
+          rain also takes yieldLpsHa (province value from city_climate) instead of intensityMmMin.
+        - gravity_pipes: { rain: true (yağmur suyu, h/d 0,7) | false (pis su, h/d 0,5; values = yük birimi, Q = 0,5·YB), slopeA (1:A; 20,25,30,33,40,50,60,67,70,80,100,125,150,175,200), values: [...] }
+          → DN per line, as tesisat.org's doluluk-oranı tool (DIN 1986-100, Prandtl–Colebrook kb 1 mm); null DN = hidrolik hesap gerekir
+        - fixture_units: { horizontal, roughness: 0.35|0.25, slopeA: 100|50, values: [sarfiyat birimi per line] } → DN by SB (tesisat.org atık su tablosu);
+          fixture SB values: hela taşı 10, duş 4, lavabo 1–2, bide 2, pisuvar 4, döşeme süzgeci 2–10
         Design limits (max velocity, pressure drop, allowed gas drop, outside design temperature) come from the project specification: ask, don't assume.
         """)]
-    public async Task<string> Calculate([Description("pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator or booster")] string kind,
+    public async Task<string> Calculate([Description("pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes or fixture_units")] string kind,
         [Description("Input object for that kind")] JsonElement input, CancellationToken ct)
     {
         input = Json(input);
@@ -125,9 +130,25 @@ public sealed class Tools(AppClient app)
             "rain" => ("host.calc.rain", new { input }),
             "radiator" => ("host.calc.radiator", new { input }),
             "booster" => ("host.calc.booster", new { input }),
-            _ => throw new McpAppException("kind: pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator veya booster olmalı."),
+            "gravity_pipes" => ("host.calc.gravityPipes", input),
+            "fixture_units" => ("host.calc.fixtureUnits", input),
+            _ => throw new McpAppException("kind: pipe, pipe_flow, duct, psychro, tank, gas, heatloss, voltage_drop, power, compensation, fire_water, rain, radiator, booster, gravity_pipes veya fixture_units olmalı."),
         };
         return Text(await app.CallAsync(cmd, args, ct));
+    }
+
+    [McpServerTool(Name = "city_climate", ReadOnly = true), Description("""
+        Province design data (81 il except Düzce; source tesisat.org): altitude, latitude, winter outside design temperature (DH, °C)
+        for heat loss, summer dry/wet bulb (KT/YT, °C) for cooling, rain yield (l/s·ha) for roof drainage. Without a name: all provinces.
+        """)]
+    public async Task<string> CityClimate([Description("Province name, e.g. Ankara (a location text containing it also works)")] string? name = null, CancellationToken ct = default)
+    {
+        var all = await app.CallAsync("host.calc.cities", null, ct);
+        if (string.IsNullOrWhiteSpace(name)) return Text(all);
+        var cities = all?["cities"]?.AsArray() ?? [];
+        var hit = cities.FirstOrDefault(c => string.Equals(c?["name"]?.GetValue<string>(), name.Trim(), StringComparison.CurrentCultureIgnoreCase))
+            ?? cities.FirstOrDefault(c => name.Contains(c?["name"]?.GetValue<string>() ?? "\0", StringComparison.CurrentCultureIgnoreCase));
+        return hit is null ? $"\"{name}\" listede yok (Düzce kaynakta bulunmuyor)." : Text(new JsonObject { ["source"] = all?["source"]?.DeepClone(), ["city"] = hit.DeepClone() });
     }
 
     [McpServerTool(Name = "insulation_evaluate", ReadOnly = true), Description("""

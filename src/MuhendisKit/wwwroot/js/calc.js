@@ -16,6 +16,16 @@ function sizingTable(rows, cols, suggested) {
 const fitBadge = r => r.fits ? h("span", { class: "badge ok" }, "Uygun") : h("span", { class: "badge" }, "—");
 // Lookup tables a calculator's form loads from the host once (e.g. the rain regulation's C and Manning tables).
 const CALC_TABLES = {};
+// Several line values in one field: whitespace or ';' separated, Turkish decimal comma allowed.
+const parseList = s => String(s ?? "").split(/[\s;]+/).map(parseNum).filter(x => isFinite(x) && x > 0);
+async function cityList() { return (CALC_TABLES.cities ??= await rpc("calc.cities")).cities; }
+/** Province dropdown (tesisat.org climate table); onChange gets the chosen city object or null. */
+async function citySelect(obj, key, label, onChange, filter = () => true) {
+  const list = (await cityList()).filter(filter);
+  return selectField(obj, key, label, [{ value: null, label: "Seçilmedi" }, ...list.map(c => ({ value: c.name, label: c.name }))], {
+    onChange: v => onChange(list.find(c => c.name === v) ?? null), hint: "Kaynak: tesisat.org iklim verileri (Düzce listede yok)",
+  });
+}
 
 const CALCS = [
   {
@@ -284,7 +294,7 @@ const CALCS = [
     id: "rain", title: "Yağmur suyu debisi ve boru çapı", icon: "droplet", keywords: "yağmur suyu rasyonel yöntem akış katsayısı kanal boru manning parsel",
     desc: "Rasyonel yöntemle yağmur suyu debisi ve kısmi dolu Manning ile boru/kanal çapı; Yağmursuyu Toplama, Depolama ve Deşarj Sistemleri Hakkında Yönetmelik (2017) EK-1.",
     formula: "r = 166,7 · i   (l/s·ha; i mm/dak)   [denklem 1.2]\nQ = C · r · A   (l/s; A ha)   [denklem 1.8]\nQ = (1/n) · A · R^(2/3) · S^(1/2)   (kısmi dolu daire kesit)\nSınırlar: hız 0,5–5 m/s, doluluk ≤ %90; beton kanalda Çizelge 1.4 eğimleri",
-    init: () => ({ area: 1000, areaType: "apartman", c: 0.7, i: null, material: "beton", slope: 1, fill: 0.9 }),
+    init: () => ({ area: 1000, areaType: "apartman", c: 0.7, city: null, i: null, material: "beton", slope: 1, fill: 0.9 }),
     async form(v, go) {
       CALC_TABLES.rain ??= await rpc("calc.rainTables");
       const t = CALC_TABLES.rain;
@@ -295,13 +305,17 @@ const CALCS = [
           onChange: () => { const a = t.areaTypes.find(x => x.id === v.areaType); v.c = a.cMax; go(true); },
         }),
         numField(v, "c", "Akış katsayısı C", { hint: at ? `Tablo aralığı ${fmt(at.cMin, 2)}–${fmt(at.cMax, 2)}; varsayılan üst sınır` : null, onChange: go }),
-        numField(v, "i", "Yağış şiddeti i", { unit: "mm/dak", hint: "MGM süre-şiddet-frekans verisinden (yerel değer)", onChange: go }),
+        await citySelect(v, "city", "İl (yağmur verimi)", () => go(true), c => c.rainYieldLpsHa != null),
+        !v.city && numField(v, "i", "Yağış şiddeti i", { unit: "mm/dak", hint: "İl seçmezseniz yerel MGM verisinden girin", onChange: go }),
         selectField(v, "material", "Boru malzemesi (Çizelge 1.5)", t.materials.map(m => ({ value: m.id, label: `${m.name} (n = ${fmt(m.manning, 3)})` })), { onChange: go }),
         numField(v, "slope", "Eğim", { unit: "%", hint: "Bina yatay boruları: şartnameye göre en az %1", onChange: go }),
         numField(v, "fill", "En büyük doluluk oranı", { hint: "Yönetmelik: %90'a kadar", onChange: go }));
     },
-    validate: v => v.i == null ? "Yağış şiddetini girin (MGM'nin yerel süre-şiddet-frekans verisi; program bölgesel değer tahmin etmez)." : null,
-    compute: v => rpc("calc.rain", { input: { areaM2: v.area, c: v.c, intensityMmMin: v.i, material: v.material, slopePercent: v.slope, maxFilling: v.fill } }),
+    validate: v => v.i == null && !v.city ? "İl seçin ya da yağış şiddetini girin (yerel MGM verisi)." : null,
+    async compute(v) {
+      const city = v.city ? (await cityList()).find(c => c.name === v.city) : null;
+      return rpc("calc.rain", { input: { areaM2: v.area, c: v.c, intensityMmMin: v.i ?? 0, yieldLpsHa: city?.rainYieldLpsHa ?? null, material: v.material, slopePercent: v.slope, maxFilling: v.fill } });
+    },
     view(r) {
       return [
         h("div", { class: "stats" },
@@ -320,6 +334,68 @@ const CALCS = [
       ];
     },
     summary: (r, v) => `A ${fmt(v.area, 0)} m², C ${fmt(v.c, 2)}, i ${fmt(v.i, 2)} mm/dak → Q ${fmt(r.flowLps, 1)} l/s, ${r.suggested ? "Ø" + r.suggested : "uygun çap yok"}`,
+  },
+  {
+    id: "gravity", title: "Yağmur / pis su borusu (doluluk)", icon: "droplet", keywords: "yağmur suyu pis su atık su boru çapı doluluk oranı eğim din 1986 kanalizasyon",
+    desc: "Doluluk oranına göre yatay yağmur ve pis su borusu çapı (DIN 1986-100 yöntemi; tesisat.org aracıyla aynı sonuçları verir). Her satır bir hat.",
+    formula: "Prandtl–Colebrook, kb = 1,0 mm, ν = 1,31·10⁻⁶ m²/s, kısmi dolu kesitin hidrolik çapıyla\nDoluluk: yağmur suyu h/d = 0,7, pis su h/d = 0,5\nPis su debisi Q = 0,5 × yük birimi\nHız v = Q / (π/4 · (0,975·DN)²)",
+    init: () => ({ rain: true, slope: 100, values: "2 5 10 20" }),
+    form(v, go) {
+      return h("div", { class: "fields" },
+        selectField(v, "rain", "Tesisat", [{ value: true, label: "Yağmur suyu (debi, l/s)" }, { value: false, label: "Pis su (yük birimi)" }], { onChange: () => go(true) }),
+        selectField(v, "slope", "Eğim", [20, 25, 30, 33, 40, 50, 60, 67, 70, 80, 100, 125, 150, 175, 200].map(a => ({ value: a, label: `1:${a} (%${fmt(100 / a, 2)})` })), { onChange: go }),
+        textField(v, "values", v.rain ? "Hat debileri (l/s)" : "Hat yük birimleri", { placeholder: "Boşluk ya da noktalı virgülle ayırın: 2 5 10,5", onChange: go }));
+    },
+    validate: v => parseList(v.values).length ? null : "En az bir hat değeri girin.",
+    compute: v => rpc("calc.gravityPipes", { rain: v.rain, slopeA: v.slope, values: parseList(v.values) }),
+    view(r, v) {
+      return [
+        h("div", { class: "table-wrap" }, h("table", { class: "t" },
+          h("thead", null, h("tr", null, ["Hat", v.rain ? "Debi (l/s)" : "Yük birimi", "Debi (l/s)", "Çap", "Kapasite (l/s)", "Hız (m/s)"].map((x, i) => h("th", { class: i ? "num" : null }, x)))),
+          h("tbody", null, r.map((l, i) => h("tr", null, h("td", null, i + 1), h("td", { class: "num" }, fmt(l.input, 2)), h("td", { class: "num" }, fmt(l.flowLps, 2)),
+            h("td", { class: "num" }, l.dn ? h("b", null, "Ø" + l.dn) : h("span", { class: "badge bad" }, "Hidrolik hesap gerekir")),
+            h("td", { class: "num" }, l.capacityLps != null ? fmt(l.capacityLps, 1) : "—"), h("td", { class: "num" }, l.velocity != null ? fmt(l.velocity, 2) : "—")))))),
+        note("Kaynak yöntem: tesisat.org Doluluk Oranına Göre Yağmursuyu ve Atık Su Boru Çapı Hesabı (izinle; 600 örnekle karşılaştırıldı)."),
+      ];
+    },
+    summary: (r, v) => `${v.rain ? "Yağmur" : "Pis su"} 1:${v.slope}: ` + r.map(l => l.dn ? "Ø" + l.dn : "hidrolik").join(", "),
+  },
+  {
+    id: "fixture", title: "Atık su borusu (sarfiyat birimi)", icon: "droplet", keywords: "atık su pis su sarfiyat birimi vitrifiye boru çapı kolon yatay",
+    desc: "Vitrifiye sarfiyat birimlerinin toplamına göre yatay boru ve kolon çapı (tesisat.org atık su tablosu).",
+    formula: "Hat SB = Σ (adet × vitrifiye SB)\nYatay boru: pürüz katsayısı ve eğime göre tablo kapasitesi ≥ SB olan en küçük çap\nKolon: Ø70 ≤ 40, Ø100 ≤ 150, Ø125 ≤ 400, Ø150 ≤ 900, Ø200 ≤ 2200 SB",
+    init: () => ({ horizontal: true, rough: 0.35, slope: 100, values: "", counts: {} }),
+    async form(v, go) {
+      const fixtures = CALC_TABLES.fixtures ??= await rpc("calc.fixtures");
+      const total = () => fixtures.reduce((a, f) => a + (v.counts[f.name] ?? 0) * f.sb, 0);
+      const totalCell = h("b", null, fmt(total(), 1));
+      const counter = h("div", { class: "table-wrap", style: { maxHeight: "260px" } }, h("table", { class: "t" },
+        h("thead", null, h("tr", null, h("th", null, "Vitrifiye"), h("th", { class: "num" }, "SB"), h("th", { class: "num" }, "Adet"))),
+        h("tbody", null, fixtures.map(f => h("tr", null, h("td", null, f.name), h("td", { class: "num" }, fmt(f.sb, 0)),
+          h("td", null, numField(v.counts, f.name, null, { bare: true, cls: "num", placeholder: "0", onChange: () => { totalCell.textContent = fmt(total(), 1); } })))))));
+      return h("div", { class: "stack" },
+        h("div", { class: "fields" },
+          selectField(v, "horizontal", "Boru", [{ value: true, label: "Yatay" }, { value: false, label: "Düşey (kolon)" }], { onChange: () => go(true) }),
+          v.horizontal && selectField(v, "rough", "Pürüz katsayısı", [{ value: 0.35, label: "0,35" }, { value: 0.25, label: "0,25" }], { onChange: go }),
+          v.horizontal && selectField(v, "slope", "Eğim", [{ value: 100, label: "1:100" }, { value: 50, label: "1:50" }], { onChange: go }),
+          textField(v, "values", "Hat sarfiyat birimleri", { placeholder: "Boşlukla ayırın: 12 40 150", onChange: go })),
+        h("details", null, h("summary", null, "Vitrifiye sayımından sarfiyat birimi"), counter,
+          h("div", { class: "row" }, h("span", null, "Toplam: "), totalCell, h("span", null, " SB"),
+            btn("Hat olarak ekle", () => { v.values = (v.values + " " + fmt(total(), 1).replace(".", "")).trim(); v.counts = {}; go(true); }, { cls: "sm", icon: "plus" }))));
+    },
+    validate: v => parseList(v.values).length ? null : "En az bir hat sarfiyat birimi girin (ya da vitrifiye sayımından ekleyin).",
+    compute: v => rpc("calc.fixtureUnits", { horizontal: v.horizontal, roughness: v.rough, slopeA: v.slope, values: parseList(v.values) }),
+    view(r) {
+      return [
+        h("div", { class: "table-wrap" }, h("table", { class: "t" },
+          h("thead", null, h("tr", null, ["Hat", "SB", "Çap", "Tablo kapasitesi (SB)", "Debi (l/s)"].map((x, i) => h("th", { class: i ? "num" : null }, x)))),
+          h("tbody", null, r.map((l, i) => h("tr", null, h("td", null, i + 1), h("td", { class: "num" }, fmt(l.sb, 1)),
+            h("td", { class: "num" }, l.dn ? h("b", null, "Ø" + l.dn) : h("span", { class: "badge bad" }, "Hidrolik hesap gerekir")),
+            h("td", { class: "num" }, l.capacitySb != null ? fmt(l.capacitySb, 0) : "—"), h("td", { class: "num" }, l.capacityLps != null ? fmt(l.capacityLps, 2) : "—")))))),
+        note("Kaynak: tesisat.org Atık Su Boru Çapı Hesabı tabloları (izinle)."),
+      ];
+    },
+    summary: (r, v) => `${v.horizontal ? "Yatay" : "Kolon"}: ` + r.map(l => `${fmt(l.sb, 0)} SB → ${l.dn ? "Ø" + l.dn : "hidrolik"}`).join(", "),
   },
   {
     id: "vdrop", title: "Gerilim düşümü ve kesit", icon: "bolt", keywords: "elektrik kablo kesit gerilim düşümü linye kolon",
@@ -531,6 +607,20 @@ App.register({
     const elements = App.project?.data.insulation.elements ?? [];
     const resultHost = h("div");
     const roomsHost = h("div", { class: "stack" });
+    const outsideField = numField(st, "outsideTemp", "Dış hesap sıcaklığı", { unit: "°C", onChange: changed });
+    const cityHost = h("div", { class: "fields" }, numField(st, "insideTemp", "İç hesap sıcaklığı", { unit: "°C", onChange: changed }), outsideField);
+    cityList().then(async list => {
+      // A new heat-loss sheet takes the province from the project's location text.
+      if (st.city == null && st.outsideTemp == null) {
+        const loc = App.project?.data.info?.location ?? "";
+        const hit = list.find(c => loc.toLocaleLowerCase(TR).includes(c.name.toLocaleLowerCase(TR)));
+        if (hit) { st.city = hit.name; st.outsideTemp = hit.winterDesignC; changed(); }
+      }
+      cityHost.prepend(await citySelect(st, "city", "İl", city => {
+        if (city) { st.outsideTemp = city.winterDesignC; outsideField.querySelector("input").value = String(city.winterDesignC).replace(".", ","); }
+        changed();
+      }));
+    }).catch(fail);
 
     const newRoom = () => ({ id: uid(), name: `Mahal ${st.rooms.length + 1}`, volume: null, n: null, increment: 0, insideTemp: null,
       surfaces: [{ id: uid(), name: "Dış duvar", area: null, u: null, dt: null }] });
@@ -601,10 +691,8 @@ App.register({
         App.project ? h("span", { class: "badge ok" }, "Projeye otomatik kaydediliyor") : h("span", { class: "badge warn" }, "Proje açık değil: kaydedilmez"),
         btn("PDF", () => this.heatLossPdf(st), { cls: "sm", icon: "pdf" })),
       h("div", { class: "card-body stack" }, h("p", { class: "muted" }, c.desc),
-        note("Dış hesap sıcaklığı, yön ve işletme artırımları TS 2164 tablolarından mühendis tarafından girilir; program bu değerleri varsaymaz."),
-        h("div", { class: "fields" },
-          numField(st, "insideTemp", "İç hesap sıcaklığı", { unit: "°C", onChange: changed }),
-          numField(st, "outsideTemp", "Dış hesap sıcaklığı", { unit: "°C", onChange: changed })))));
+        note("İl seçilince dış hesap sıcaklığı tesisat.org iklim tablosundan gelir; yön ve işletme artırımları mühendis tarafından girilir."),
+        cityHost)));
     panel.append(roomsHost);
     panel.append(h("div", null, btn("Mahal ekle", () => { st.rooms.push(newRoom()); renderRooms(); changed(); }, { cls: "primary", icon: "plus" })));
     panel.append(h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "Sonuç")), h("div", { class: "card-body" }, resultHost)));

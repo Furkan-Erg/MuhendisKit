@@ -57,8 +57,9 @@ public static class RainRegulation
 /// <param name="C">yüzeysel akış katsayısı (Çizelge 1.3)</param>
 /// <param name="IntensityMmMin">yağış şiddeti i (mm/dak), from the local süre-şiddet-frekans data (MGM)</param>
 /// <param name="SlopePercent">boru/kanal eğimi (%)</param>
+/// <param name="YieldLpsHa">yağmur verimi r (l/s·ha) given directly (e.g. the province value in <see cref="Cities"/>); replaces the intensity</param>
 public sealed record RainDrainageInput(double AreaM2, double C, double IntensityMmMin, string Material, double SlopePercent,
-    double MaxFilling = RainRegulation.MaxFilling, double? ManningN = null);
+    double MaxFilling = RainRegulation.MaxFilling, double? ManningN = null, double? YieldLpsHa = null);
 
 public sealed record RainPipeRow(int DiameterMm, double CapacityLps, double? Filling, double? Velocity, bool Fits, string? Warning);
 
@@ -93,11 +94,11 @@ public static class RainDrainage
 
     public static RainDrainageResult Size(RainDrainageInput i)
     {
-        if (i.AreaM2 <= 0 || i.IntensityMmMin <= 0 || i.SlopePercent <= 0) throw new ArgumentException("Alan, yağış şiddeti ve eğim pozitif olmalı.");
+        if (i.AreaM2 <= 0 || i.SlopePercent <= 0 || (i.YieldLpsHa ?? i.IntensityMmMin) <= 0) throw new ArgumentException("Alan, yağış şiddeti ve eğim pozitif olmalı.");
         if (i.C is <= 0 or > 1) throw new ArgumentException("C katsayısı 0 ile 1 arasında olmalı.");
         double n = i.ManningN ?? RainRegulation.Materials.FirstOrDefault(m => m.Id == i.Material)?.Manning
             ?? throw new ArgumentException($"Bilinmeyen boru malzemesi: {i.Material}");
-        double r = RainRegulation.YieldFromIntensity(i.IntensityMmMin);
+        double r = i.YieldLpsHa ?? RainRegulation.YieldFromIntensity(i.IntensityMmMin);
         double qLps = i.C * r * i.AreaM2 / 10_000;                 // denklem 1.8, A in ha
         double s = i.SlopePercent / 100, q = qLps / 1000;
         var rows = Diameters.Select(dmm =>
